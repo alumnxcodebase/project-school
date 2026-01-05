@@ -368,5 +368,5 @@ Authentication failed
 MIT License
 
 
-Updated by Deepanshu Sonwane .
-Updated by Vishal P
+- Updated by Deepanshu Sonwane .
+- Updated by Vishal P
