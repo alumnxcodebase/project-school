@@ -8,6 +8,9 @@ from bson import ObjectId
 import os
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
+from langgraph.graph import StateGraph, END
+from typing_extensions import TypedDict
+from fastapi import Body
 
 load_dotenv()
 
@@ -104,6 +107,7 @@ class TaskUpdate(BaseModel):
     assigned_to: Optional[str] = None
     due_date: Optional[datetime] = None
 
+"""chat class"""
 
 class ChatUpdate(BaseModel):
     message: Optional[str] = None
@@ -117,6 +121,25 @@ class ChatUpdate(BaseModel):
     userType: str = Field(..., pattern="^(user|agent)$")  # Restricts to user or agent
     timestamp: datetime = Field(default_factory=datetime.now)
 
+
+"""class for user profile"""
+
+class UserProfile(BaseModel):
+    userId: str
+    goals: List[str] = []
+    current_project_id: Optional[str] = None
+
+
+"""This class represents the internal state of agent during a single turn"""
+
+class AgentState(TypedDict):
+    userId: str
+    message: str
+    goals: List[str]
+    has_history: bool
+    active_task: Optional[dict]
+    active_project: Optional[dict]
+    response_text: str
 
 
 def project_helper(project) -> dict:
@@ -157,6 +180,73 @@ def chat_helper(chat) -> dict:
         "message": chat["message"],
         "timestamp": chat.get("timestamp")
     }
+
+
+
+""" --- AGENT NODES ---"""
+
+async def analyze_user_state(state: AgentState):
+    """Entry node: Gathers data from MongoDB to decide next steps."""
+    user_id = state["userId"]
+
+    # 1. Check Profile Goals
+    profile = await db.profiles.find_one({"userId": user_id})
+    goals = profile.get("goals", []) if profile else []
+
+    # 2. Check Chat History
+    history_count = await db.chats.count_documents({"userId": user_id})
+
+    # 3. Check for Active Tasks
+    task = await db.tasks.find_one({"assigned_to": user_id, "status": {"$ne": "completed"}})
+
+    # 4. Check for Active Project
+    project = None
+    if profile and profile.get("current_project_id"):
+        project = await db.projects.find_one({"_id": ObjectId(profile["current_project_id"])})
+
+    return {
+        "goals": goals,
+        "has_history": history_count > 0,
+        "active_task": task,
+        "active_project": project
+    }
+
+
+def router_logic(state: AgentState):
+    """The decision engine."""
+    if not state["goals"] or not state["has_history"]:
+        return "ask_goals"
+    if state["active_task"]:
+        return "query_task"
+    if not state["active_project"]:
+        return "assign_new_project"
+    return "general_chat"
+
+
+# --- GRAPH DEFINITION ---
+
+workflow = StateGraph(AgentState)
+
+workflow.add_node("analyze", analyze_user_state)
+
+# Nodes for different responses
+workflow.add_node("ask_goals",
+                  lambda x: {"response_text": "Welcome! I don't see any goals yet. What would you like to learn?"})
+workflow.add_node("query_task", lambda x: {
+    "response_text": f"How is your task '{x['active_task']['title']}' coming along? Is it completed?"})
+workflow.add_node("assign_new_project", lambda x: {
+    "response_text": "You're all caught up! I'm assigning a new project from our pool based on your goals."})
+workflow.add_node("general_chat",
+                  lambda x: {"response_text": "Welcome back! What's on your mind today regarding your studies?"})
+
+workflow.set_entry_point("analyze")
+workflow.add_conditional_edges("analyze", router_logic)
+
+# Compile the graph
+agent_executor = workflow.compile()
+
+
+
 @app.get("/")
 async def root():
     return {"message": "Project API with MongoDB", "version": "2.0.0"}
@@ -330,6 +420,79 @@ async def update_chat_message(message_id: str, update: ChatUpdate):
     if not updated:
         raise HTTPException(status_code=404, detail="Message not found")
     return chat_helper(updated)
+
+"""end points for agent chat with user"""
+@app.post("/chat/agent", response_model=ChatUpdate, status_code=201)
+async def chat_with_agent(chat_req: ChatUpdate = Body(...)):
+    user_id = chat_req.userId
+    user_message = chat_req.message
+
+    # 1. PRE-PROCESSING: Fetch Context from MongoDB
+    # Check Profile for Goals
+    profile = await db.profiles.find_one({"userId": user_id})
+    user_goals = profile.get("goals", []) if profile else []
+
+    # Check History
+    history = await db.chats.find({"userId": user_id}).to_list(length=1)
+
+    # Check Tasks
+    active_task = await db.tasks.find_one({"assigned_to": user_id, "status": "pending"})
+
+    # Check Projects
+    active_project = await db.projects.find_one(
+        {"_id": ObjectId(profile["current_project_id"])}) if profile and profile.get("current_project_id") else None
+
+    # 2. LANGGRAPH LOGIC (Simplified for the endpoint)
+    agent_response = ""
+
+    if not user_goals or not history:
+        # Scenario: First time or no goals defined
+        agent_response = "Hi there! Welcome to the platform. To get started, what are your primary learning goals?"
+
+    elif active_task:
+        # Scenario: Task exists, ask for completion
+        agent_response = f"I see you're working on '{active_task['title']}'. Have you completed this task yet?"
+
+    elif not active_project:
+        # Scenario: Goals exist but no project assigned
+        # Logic to pick from pool
+        project_pool = await db.projects.find({"status": "active"}).to_list(length=1)
+        if project_pool:
+            new_p = project_pool[0]
+            await db.profiles.update_one(
+                {"userId": user_id},
+                {"$set": {"current_project_id": str(new_p["_id"])}},
+                upsert=True
+            )
+            agent_response = f"Great goals! I've assigned you to the project: {new_p['name']}. Ready to dive in?"
+        else:
+            agent_response = "You're all set! I'm currently looking for a project that matches your goals."
+
+    else:
+        # General engagement
+        agent_response = "Welcome back! How can I help you with your current project today?"
+
+    # 3. STORAGE: Save both messages to History
+    # Save User Message
+    await db.chats.insert_one({
+        "userId": user_id,
+        "userType": "user",
+        "message": user_message,
+        "timestamp": datetime.now()
+    })
+
+    # Save Agent Response
+    agent_chat_doc = {
+        "userId": user_id,
+        "userType": "agent",
+        "message": agent_response,
+        "timestamp": datetime.now()
+    }
+    result = await db.chats.insert_one(agent_chat_doc)
+
+    return chat_helper(await db.chats.find_one({"_id": result.inserted_id}))
+
+
 
 if __name__ == "__main__":
     import uvicorn
