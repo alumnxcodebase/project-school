@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
@@ -8,44 +8,56 @@ from bson import ObjectId
 import os
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
+from langgraph.graph import StateGraph
+from typing_extensions import TypedDict
+
+# =========================================================
+# ENV + DB
+# =========================================================
 
 load_dotenv()
 
-MONGODB_URL = os.getenv("MONGODB_URL", "mongodb+srv://agriculture_admin:<db_password>@agriculture.ayck7vs.mongodb.net/?appName=Agriculture")
+MONGODB_URL = os.getenv(
+    "MONGODB_URL",
+    "mongodb+srv://agriculture_admin:<db_password>@agriculture.ayck7vs.mongodb.net/?appName=Agriculture"
+)
 DATABASE_NAME = os.getenv("DATABASE_NAME", "projects")
 
 client = None
 db = None
 
-# Lifespan context manager (replaces on_event)
+# =========================================================
+# LIFESPAN
+# =========================================================
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global client, db
-    # Startup
-    try:
-        client = AsyncIOMotorClient(MONGODB_URL)
-        db = client[DATABASE_NAME]
-        await client.server_info()
-        print(f"Connected to MongoDB: {DATABASE_NAME}")
-        await db.projects.create_index("name")
-        await db.projects.create_index("status")
-        await db.tasks.create_index("project_id")
-        await db.chats.create_index("timestamp")
-        await db.chats.create_index([("userId", 1), ("timestamp", 1)])
-        print("Indexes created")
-    except Exception as e:
-        print(f"Error: {e}")
-        raise
-    
-    yield  # Application runs here
-    
-    # Shutdown
-    if client:
-        client.close()
-        print("Disconnected from MongoDB")
+    client = AsyncIOMotorClient(MONGODB_URL)
+    db = client[DATABASE_NAME]
+    await client.server_info()
 
-# Initialize FastAPI with lifespan
-app = FastAPI(title="Project Management API", version="2.0.0", lifespan=lifespan)
+    await db.projects.create_index("name")
+    await db.projects.create_index("status")
+    await db.tasks.create_index("project_id")
+    await db.chats.create_index([("userId", 1), ("timestamp", 1)])
+    await db.goals.create_index("userId")
+    await db.ai_agents.create_index("userId")
+
+    print(f"✅ MongoDB connected: {DATABASE_NAME}")
+    yield
+    client.close()
+    print("❌ MongoDB disconnected")
+
+# =========================================================
+# APP
+# =========================================================
+
+app = FastAPI(
+    title="Project + Agentic AI API",
+    version="2.0.0",
+    lifespan=lifespan
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -55,281 +67,222 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Updated Pydantic models with ConfigDict
+# =========================================================
+# MODELS
+# =========================================================
+
 class Project(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-        json_encoders={ObjectId: str},
-        json_schema_extra={"examples": [{"name": "Example Project", "description": "Test"}]}
-    )
-    
-    id: Optional[str] = Field(default=None)
-    name: str = Field(..., min_length=1, max_length=200)
+    model_config = ConfigDict(json_encoders={ObjectId: str})
+    id: Optional[str] = None
+    name: str
     description: Optional[str] = None
-    status: str = Field(default="active")
-    start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
+    status: str = "active"
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
 class ProjectUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[str] = None
-    start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
+    name: Optional[str]
+    description: Optional[str]
+    status: Optional[str]
 
 class Task(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-        json_encoders={ObjectId: str}
-    )
-    
-    id: Optional[str] = Field(default=None)
+    model_config = ConfigDict(json_encoders={ObjectId: str})
+    id: Optional[str] = None
     project_id: str
-    title: str = Field(..., min_length=1, max_length=200)
-    description: Optional[str] = None
-    status: str = Field(default="pending")
-    priority: str = Field(default="medium")
-    assigned_to: Optional[str] = None
-    due_date: Optional[datetime] = None
+    title: str
+    description: Optional[str]
+    status: str = "pending"
+    priority: str = "medium"
+    assigned_to: Optional[str]
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
 class TaskUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[str] = None
-    priority: Optional[str] = None
-    assigned_to: Optional[str] = None
-    due_date: Optional[datetime] = None
+    title: Optional[str]
+    description: Optional[str]
+    status: Optional[str]
+    priority: Optional[str]
+    assigned_to: Optional[str]
 
-
-class ChatUpdate(BaseModel):
-    message: Optional[str] = None
-    model_config = ConfigDict(
-        populate_by_name=True,
-        json_encoders={ObjectId: str}
-    )
-
-    id: Optional[str] = Field(default=None)
-    userId: str = Field(..., min_length=1)
-    userType: str = Field(..., pattern="^(user|agent)$")  # Restricts to user or agent
+class Chat(BaseModel):
+    id: Optional[str] = None
+    userId: str
+    userType: str
+    message: str
     timestamp: datetime = Field(default_factory=datetime.now)
 
+class Goal(BaseModel):
+    id: Optional[str] = None
+    userId: str
+    goals: List[str]
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
 
+class AIAgent(BaseModel):
+    id: Optional[str] = None
+    userId: str
+    name: str
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
 
-def project_helper(project) -> dict:
-    """Convert MongoDB project document to API response format"""
+# =========================================================
+# HELPERS
+# =========================================================
+
+def serialize(doc):
+    doc["id"] = str(doc["_id"])
+    del doc["_id"]
+    return doc
+
+# =========================================================
+# AGENT STATE + LOGIC
+# =========================================================
+
+class AgentState(TypedDict):
+    userId: str
+    goals: List[str]
+    has_history: bool
+    active_task: Optional[dict]
+    active_project: Optional[dict]
+    response_text: str
+
+async def analyze_state(state: AgentState):
+    user_id = state["userId"]
+
+    goals_doc = await db.goals.find_one({"userId": user_id})
+    goals = goals_doc["goals"] if goals_doc else []
+
+    history_count = await db.chats.count_documents({"userId": user_id})
+    task = await db.tasks.find_one({"assigned_to": user_id, "status": {"$ne": "completed"}})
+
     return {
-        "id": str(project["_id"]),
-        "_id": str(project["_id"]),
-        "name": project["name"],
-        "description": project.get("description"),
-        "status": project.get("status", "active"),
-        "start_date": project.get("start_date"),
-        "end_date": project.get("end_date"),
-        "created_at": project.get("created_at"),
-        "updated_at": project.get("updated_at")
+        "goals": goals,
+        "has_history": history_count > 0,
+        "active_task": task,
+        "active_project": None
     }
 
-def task_helper(task) -> dict:
-    """Convert MongoDB task document to API response format"""
-    return {
-        "id": str(task["_id"]),
-        "_id": str(task["_id"]),
-        "project_id": task["project_id"],
-        "title": task["title"],
-        "description": task.get("description"),
-        "status": task.get("status", "pending"),
-        "priority": task.get("priority", "medium"),
-        "assigned_to": task.get("assigned_to"),
-        "due_date": task.get("due_date"),
-        "created_at": task.get("created_at"),
-        "updated_at": task.get("updated_at")
-    }
+def router(state: AgentState):
+    if not state["goals"]:
+        return "ask_goals"
+    if state["active_task"]:
+        return "query_task"
+    return "general_chat"
 
-def chat_helper(chat) -> dict:
-    return {
-        "id": str(chat["_id"]),
-        "userId": chat["userId"],
-        "userType": chat["userType"],
-        "message": chat["message"],
-        "timestamp": chat.get("timestamp")
-    }
+workflow = StateGraph(AgentState)
+workflow.add_node("analyze", analyze_state)
+workflow.add_node("ask_goals", lambda _: {"response_text": "What are your learning goals?"})
+workflow.add_node("query_task", lambda s: {
+    "response_text": f"How is your task '{s['active_task']['title']}' going?"
+})
+workflow.add_node("general_chat", lambda _: {
+    "response_text": "How can I help you today?"
+})
+
+workflow.set_entry_point("analyze")
+workflow.add_conditional_edges("analyze", router)
+agent = workflow.compile()
+
+# =========================================================
+# HEALTH
+# =========================================================
+
 @app.get("/")
 async def root():
-    return {"message": "Project API with MongoDB", "version": "2.0.0"}
+    return {"message": "Unified Project + Agentic AI API"}
 
 @app.get("/health")
-async def health_check():
-    return {"status": "healthy", "database": "connected"}
+async def health():
+    return {"status": "healthy"}
+
+# =========================================================
+# PROJECTS
+# =========================================================
 
 @app.post("/project", response_model=Project, status_code=201)
 async def create_project(project: Project):
-    project_dict = project.model_dump(by_alias=True, exclude={"id"})
-    project_dict["created_at"] = datetime.now()
-    project_dict["updated_at"] = datetime.now()
-    result = await db.projects.insert_one(project_dict)
-    created = await db.projects.find_one({"_id": result.inserted_id})
-    return project_helper(created)
+    res = await db.projects.insert_one(project.dict(exclude={"id"}))
+    return serialize(await db.projects.find_one({"_id": res.inserted_id}))
 
 @app.get("/project", response_model=List[Project])
-async def get_all_projects():
-    projects = []
-    cursor = db.projects.find({}).sort("created_at", -1)
-    async for project in cursor:
-        projects.append(project_helper(project))
-    return projects
+async def get_projects():
+    return [serialize(p) async for p in db.projects.find()]
 
-@app.get("/project/{project_id}", response_model=Project)
-async def get_project(project_id: str):
-    if not ObjectId.is_valid(project_id):
-        raise HTTPException(status_code=400, detail="Invalid ID")
-    project = await db.projects.find_one({"_id": ObjectId(project_id)})
-    if not project:
-        raise HTTPException(status_code=404, detail="Not found")
-    return project_helper(project)
-
-@app.put("/project/{project_id}", response_model=Project)
-async def update_project(project_id: str, update: ProjectUpdate):
-    if not ObjectId.is_valid(project_id):
-        raise HTTPException(status_code=400, detail="Invalid ID")
-    data = {k: v for k, v in update.model_dump(exclude_unset=True).items() if v is not None}
-    if data:
-        data["updated_at"] = datetime.now()
-        await db.projects.update_one({"_id": ObjectId(project_id)}, {"$set": data})
-    updated = await db.projects.find_one({"_id": ObjectId(project_id)})
-    if not updated:
-        raise HTTPException(status_code=404, detail="Not found")
-    return project_helper(updated)
-
-@app.delete("/project/{project_id}", status_code=204)
-async def delete_project(project_id: str):
-    if not ObjectId.is_valid(project_id):
-        raise HTTPException(status_code=400, detail="Invalid ID")
-    await db.tasks.delete_many({"project_id": project_id})
-    result = await db.projects.delete_one({"_id": ObjectId(project_id)})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Not found")
+# =========================================================
+# TASKS
+# =========================================================
 
 @app.post("/project-tasks", response_model=Task, status_code=201)
 async def create_task(task: Task):
-    if not ObjectId.is_valid(task.project_id):
-        raise HTTPException(status_code=400, detail="Invalid project ID")
-    task_dict = task.model_dump(by_alias=True, exclude={"id"})
-    task_dict["created_at"] = datetime.now()
-    task_dict["updated_at"] = datetime.now()
-    result = await db.tasks.insert_one(task_dict)
-    created = await db.tasks.find_one({"_id": result.inserted_id})
-    return task_helper(created)
+    res = await db.tasks.insert_one(task.dict(exclude={"id"}))
+    return serialize(await db.tasks.find_one({"_id": res.inserted_id}))
 
-@app.get("/project-tasks", response_model=List[Task])
-async def get_all_tasks(project_id: Optional[str] = None):
-    query = {"project_id": project_id} if project_id else {}
-    tasks = []
-    cursor = db.tasks.find(query).sort("created_at", -1)
-    async for task in cursor:
-        tasks.append(task_helper(task))
-    return tasks
+# =========================================================
+# GOALS
+# =========================================================
 
-@app.get("/project-tasks/{task_id}", response_model=Task)
-async def get_task(task_id: str):
-    if not ObjectId.is_valid(task_id):
-        raise HTTPException(status_code=400, detail="Invalid ID")
-    task = await db.tasks.find_one({"_id": ObjectId(task_id)})
-    if not task:
-        raise HTTPException(status_code=404, detail="Not found")
-    return task_helper(task)
+@app.post("/goals", response_model=Goal, status_code=201)
+async def create_goals(goal: Goal):
+    res = await db.goals.insert_one(goal.dict(exclude={"id"}))
+    return serialize(await db.goals.find_one({"_id": res.inserted_id}))
 
-@app.put("/project-tasks/{task_id}", response_model=Task)
-async def update_task(task_id: str, update: TaskUpdate):
-    if not ObjectId.is_valid(task_id):
-        raise HTTPException(status_code=400, detail="Invalid ID")
-    data = {k: v for k, v in update.model_dump(exclude_unset=True).items() if v is not None}
-    if data:
-        data["updated_at"] = datetime.now()
-        await db.tasks.update_one({"_id": ObjectId(task_id)}, {"$set": data})
-    updated = await db.tasks.find_one({"_id": ObjectId(task_id)})
-    if not updated:
-        raise HTTPException(status_code=404, detail="Not found")
-    return task_helper(updated)
+@app.get("/goals", response_model=List[Goal])
+async def get_goals(userId: Optional[str] = None):
+    q = {"userId": userId} if userId else {}
+    return [serialize(g) async for g in db.goals.find(q)]
 
-@app.delete("/project-tasks/{task_id}", status_code=204)
-async def delete_task(task_id: str):
-    if not ObjectId.is_valid(task_id):
-        raise HTTPException(status_code=400, detail="Invalid ID")
-    result = await db.tasks.delete_one({"_id": ObjectId(task_id)})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Not found")
+# =========================================================
+# AI AGENT REGISTRY
+# =========================================================
 
-@app.get("/project/{project_id}/stats")
-async def get_project_stats(project_id: str):
-    if not ObjectId.is_valid(project_id):
-        raise HTTPException(status_code=400, detail="Invalid ID")
-    tasks = []
-    cursor = db.tasks.find({"project_id": project_id})
-    async for task in cursor:
-        tasks.append(task)
-    return {
-        "total_tasks": len(tasks),
-        "pending": len([t for t in tasks if t.get("status") == "pending"]),
-        "in_progress": len([t for t in tasks if t.get("status") == "in_progress"]),
-        "completed": len([t for t in tasks if t.get("status") == "completed"]),
-        "blocked": len([t for t in tasks if t.get("status") == "blocked"])
+@app.post("/ai-agent", response_model=AIAgent, status_code=201)
+async def create_ai_agent(agent: AIAgent):
+    res = await db.ai_agents.insert_one(agent.dict(exclude={"id"}))
+    return serialize(await db.ai_agents.find_one({"_id": res.inserted_id}))
+
+@app.get("/ai-agent", response_model=List[AIAgent])
+async def get_ai_agents(userId: Optional[str] = None):
+    q = {"userId": userId} if userId else {}
+    return [serialize(a) async for a in db.ai_agents.find(q)]
+
+# =========================================================
+# CHAT
+# =========================================================
+
+@app.post("/chat", response_model=Chat, status_code=201)
+async def post_chat(chat: Chat):
+    res = await db.chats.insert_one(chat.dict(exclude={"id"}))
+    return serialize(await db.chats.find_one({"_id": res.inserted_id}))
+
+@app.get("/chat/{user_id}", response_model=List[Chat])
+async def get_chat(user_id: str):
+    return [
+        serialize(c)
+        async for c in db.chats.find({"userId": user_id}).sort("timestamp", 1)
+    ]
+
+# =========================================================
+# AGENT CHAT
+# =========================================================
+
+@app.post("/chat/agent", response_model=Chat, status_code=201)
+async def chat_agent(chat: Chat = Body(...)):
+    state = {"userId": chat.userId}
+    result = await agent.ainvoke(state)
+
+    await db.chats.insert_one(chat.dict(exclude={"id"}))
+    agent_msg = {
+        "userId": chat.userId,
+        "userType": "agent",
+        "message": result["response_text"],
+        "timestamp": datetime.now()
     }
+    res = await db.chats.insert_one(agent_msg)
+    return serialize(await db.chats.find_one({"_id": res.inserted_id}))
 
-
-"""post method for chat to post messages in the chat"""
-@app.post("/chat", response_model=ChatUpdate, status_code=201)
-async def store_chat_message(chat: ChatUpdate):
-    chat_dict = chat.model_dump(by_alias=True, exclude={"id"})
-    # Ensure timestamp is set at the moment of insertion
-    chat_dict["timestamp"] = datetime.now()
-
-    result = await db.chats.insert_one(chat_dict)
-    created = await db.chats.find_one({"_id": result.inserted_id})
-    return chat_helper(created)
-
-
-"""get method for chat to get the chat based upon the user id"""
-@app.get("/chat/{user_id}", response_model=List[ChatUpdate])
-async def get_conversation_history(user_id: str):
-    chats = []
-    # Sort by timestamp so the conversation reads in order
-    cursor = db.chats.find({"userId": user_id}).sort("timestamp", 1)
-    async for chat in cursor:
-        chats.append(chat_helper(chat))
-
-    if not chats:
-        return []
-    return chats
-
-"""delete method for chat to delete the chat based upon the message id"""
-@app.delete("/chat/{message_id}", status_code=204)
-async def delete_chat_message(message_id: str):
-    if not ObjectId.is_valid(message_id):
-        raise HTTPException(status_code=400, detail="Invalid message ID")
-
-    result = await db.chats.delete_one({"_id": ObjectId(message_id)})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Message not found")
-
-
-"""put method for chat to update the chat based upon the message id"""
-@app.put("/chat/{message_id}", response_model=ChatUpdate)
-async def update_chat_message(message_id: str, update: ChatUpdate):
-    if not ObjectId.is_valid(message_id):
-        raise HTTPException(status_code=400, detail="Invalid message ID")
-
-    data = {k: v for k, v in update.model_dump(exclude_unset=True).items() if v is not None}
-    if data:
-        await db.chats.update_one({"_id": ObjectId(message_id)}, {"$set": data})
-
-    updated = await db.chats.find_one({"_id": ObjectId(message_id)})
-    if not updated:
-        raise HTTPException(status_code=404, detail="Message not found")
-    return chat_helper(updated)
+# =========================================================
+# RUN
+# =========================================================
 
 if __name__ == "__main__":
     import uvicorn
