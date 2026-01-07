@@ -22,6 +22,26 @@ class Task(BaseModel):
     status: str = "pending"
     assigned_to: Optional[str] = None
 
+class ProjectWithTasks(BaseModel):
+    """Response model for project details with associated tasks"""
+    model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
+    id: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    status: str = "active"
+    created_at: datetime
+    tasks: List[Task] = Field(default_factory=list)
+
+class ProjectWithTasks(BaseModel):
+    """Response model for project details with associated tasks"""
+    model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
+    id: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    status: str = "active"
+    created_at: datetime
+    tasks: List[Task] = Field(default_factory=list)
+
 class Chat(BaseModel):
     id: Optional[str] = None
     userId: str
