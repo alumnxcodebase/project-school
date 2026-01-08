@@ -17,6 +17,14 @@ async def create_task(request: Request, task: Task = Body(...)):
     return serialize(new_task)
 
 
+@router.get("/", response_model=List[Task])
+async def get_all_tasks(request: Request):
+    db = request.app.state.db
+    # Find all tasks
+    cursor = db.tasks.find({})
+    return [serialize(doc) async for doc in cursor]
+
+
 @router.get("/user/{user_id}", response_model=List[Task])
 async def get_user_tasks(request: Request, user_id: str):
     db = request.app.state.db
