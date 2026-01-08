@@ -71,3 +71,13 @@ class TaskUpdate(BaseModel):
 class UserTaskLink(BaseModel):
     userId: str
     taskId: str #objectId
+
+class TaskInfo(BaseModel):
+    """Simplified task info for relevant tasks response"""
+    taskId: str
+    taskName: str
+
+class ProjectWithRelevantTasks(BaseModel):
+    """Response model for project with LLM-filtered relevant tasks"""
+    projectId: str
+    tasks: List[TaskInfo] = Field(default_factory=list)
