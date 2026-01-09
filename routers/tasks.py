@@ -171,3 +171,45 @@ async def update_user_task_assignment(
             raise HTTPException(status_code=404, detail="Assignment not found")
     
     return {"status": "success", "message": "Assignment updated"}
+
+@router.post("/rearrange-user-tasks", status_code=200)
+async def rearrange_user_tasks(request: Request, payload: dict = Body(...)):
+    """
+    Rearrange tasks for a user by updating their sequenceId values.
+    Accepts a list of tasks with updated sequenceIds.
+    """
+    db = request.app.state.db
+    
+    user_id = payload.get("userId")
+    tasks = payload.get("tasks", [])
+    
+    if not user_id:
+        raise HTTPException(status_code=400, detail="userId is required")
+    
+    if not tasks:
+        raise HTTPException(status_code=400, detail="tasks array is required")
+    
+    # Verify user assignment exists
+    assignment = await db.assignments.find_one({"userId": user_id})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="No assignments found for this user")
+    
+    # Update sequenceId for each task
+    for task_update in tasks:
+        task_id = task_update.get("taskId")
+        sequence_id = task_update.get("sequenceId")
+        
+        if not task_id or sequence_id is None:
+            continue
+        
+        # Update the sequenceId for the specific task in the array
+        await db.assignments.update_one(
+            {"userId": user_id},
+            {"$set": {"tasks.$[elem].sequenceId": sequence_id}},
+            array_filters=[{"elem.taskId": task_id}]
+        )
+    
+    return {
+        "status": "success",
+        "message": f"Task order updated for user {user_id}"
+    }
