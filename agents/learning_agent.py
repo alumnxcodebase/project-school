@@ -191,6 +191,36 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
                 print(f"❌ Error: {str(e)}")
                 return [{"error": str(e)}]
         
+        @tool
+        async def get_user_assigned_tasks(user_id: str) -> dict:
+            """Fetch all tasks already assigned to the user (both completed and pending)."""
+            try:
+                print(f"🔍 Fetching assigned tasks for user: {user_id}")
+                assignment = await db.assignments.find_one({"userId": user_id})
+                
+                if not assignment or not assignment.get("tasks"):
+                    print("✅ No tasks assigned to user yet")
+                    return {"assigned_task_ids": [], "completed_task_ids": []}
+                
+                assigned_task_ids = []
+                completed_task_ids = []
+                
+                for task in assignment.get("tasks", []):
+                    task_id = task.get("taskId")
+                    if task_id:
+                        assigned_task_ids.append(task_id)
+                        if task.get("isCompleted", False):
+                            completed_task_ids.append(task_id)
+                
+                print(f"✅ User has {len(assigned_task_ids)} assigned tasks ({len(completed_task_ids)} completed)")
+                return {
+                    "assigned_task_ids": assigned_task_ids,
+                    "completed_task_ids": completed_task_ids
+                }
+            except Exception as e:
+                print(f"❌ Error: {str(e)}")
+                return {"error": str(e), "assigned_task_ids": [], "completed_task_ids": []}
+        
         # Determine mode based on user message
         is_task_assignment_mode = (
             user_message and 
@@ -201,16 +231,25 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
         
         if is_task_assignment_mode:
             print("🎯 MODE: Task Assignment")
-            tools = [get_user_goals, get_project_details, get_project_tasks]
+            tools = [get_user_goals, get_project_details, get_project_tasks, get_user_assigned_tasks]
             
             system_prompt = f"""You are {agent_name}, an expert learning path advisor.
 
 Your task:
 1. Use get_user_goals to fetch the user's learning goals
-2. Use get_project_details for project_id: "695caa41c485455f397017ae"
-3. Use get_project_tasks to fetch ALL tasks
-4. Analyze user goals vs tasks (title + description)
-5. Select exactly 6 tasks in progressive order (foundation → intermediate → advanced)
+2. Use get_user_assigned_tasks to fetch tasks already assigned to the user
+3. Use get_project_details for project_id: "695caa41c485455f397017ae"
+4. Use get_project_tasks to fetch ALL tasks from the project
+5. Filter OUT any tasks whose ID appears in the assigned_task_ids list
+6. From the remaining UNASSIGNED tasks, select exactly 6 tasks
+7. Analyze user goals vs the unassigned tasks (title + description)
+8. Select tasks in progressive order (foundation → intermediate → advanced)
+
+CRITICAL RULES:
+- NEVER recommend tasks that are already in assigned_task_ids
+- ONLY suggest tasks from the project that the user has NOT been assigned yet
+- Select exactly 6 NEW tasks that match user's goals
+- Ensure logical learning progression
 
 RESPONSE FORMAT - Return ONLY task titles as a numbered list:
 1. [Task Title 1]
@@ -220,18 +259,17 @@ RESPONSE FORMAT - Return ONLY task titles as a numbered list:
 5. [Task Title 5]
 6. [Task Title 6]
 
-RULES:
-- Match tasks to user's stated goals
-- Ensure logical learning progression
-- No explanations, just the numbered list"""
+No explanations, just the numbered list of NEW tasks."""
 
             user_prompt = f"""User ID: {user_id}
 
-Create my personalized learning path:
+Create my personalized learning path with NEW tasks only:
 1. Fetch my learning goals
-2. Fetch project and all tasks
-3. Select 6 tasks matching my goals in learning order
-4. Return ONLY the numbered list of task titles"""
+2. Fetch my already assigned tasks (to exclude them)
+3. Fetch project and all tasks
+4. Filter out any tasks I already have assigned
+5. From remaining tasks, select 6 that match my goals in learning order
+6. Return ONLY the numbered list of task titles"""
             
         else:
             print("💬 MODE: Conversational Career Guidance")
