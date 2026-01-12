@@ -1,9 +1,11 @@
-# from .project import Project, ProjectUpdate, Task, TaskUpdate
-# from .goal import Goal
-# from .chat import Chat, AgentState
-# from .agent import AIAgent
-from .models import Project, Task,Goal, Chat, AgentState,TaskUpdate
+from .models import (
+    Project, Task, Goal, Chat, 
+    TaskUpdate, UserTaskLink, ProjectWithTasks,
+    Comment, TaskResponse, TaskAssignment, Assignment
+)
+
 __all__ = [
-    "Project", "Task",
-    "Goal", "Chat", "AgentState","TaskUpdate",
+    "Project", "Task", "Goal", "Chat", 
+    "TaskUpdate", "UserTaskLink", "ProjectWithTasks",
+    "Comment", "TaskResponse", "TaskAssignment", "Assignment"
 ]

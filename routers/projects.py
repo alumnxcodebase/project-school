@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, Body, HTTPException
-from models import Project
+from models import Project, ProjectWithTasks, Task
 from utils.helpers import serialize
 from bson import ObjectId
 from typing import List
@@ -24,19 +24,36 @@ async def create_new_project(request: Request, project: Project = Body(...)):
     return serialize(new_project)
 
 
-@router.get("/{project_id}", response_model=Project)
+@router.get("/{project_id}", response_model=ProjectWithTasks)
 async def get_project_details(request: Request, project_id: str):
+    """
+    Get project details along with all associated tasks.
+    """
     db = request.app.state.db
+    
     if not ObjectId.is_valid(project_id):
         raise HTTPException(status_code=400, detail="Invalid Project ID")
 
     project = await db.projects.find_one({"_id": ObjectId(project_id)})
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    return serialize(project)
+    
+    project_data = serialize(project)
+    
+    tasks_cursor = db.tasks.find({"project_id": project_id})
+    tasks = [serialize(task) async for task in tasks_cursor]
+    
+    project_with_tasks = {
+        **project_data,
+        "tasks": tasks
+    }
+    
+    return project_with_tasks
+
 
 @router.get("/{project_id}/stats")
 async def get_project_stats(request: Request, project_id: str):
+    """Get statistics about tasks in a project"""
     db = request.app.state.db
     tasks = await db.tasks.find({"project_id": project_id}).to_list(length=100)
     return {
