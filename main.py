@@ -4,8 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-
-from routers import projects, chat, goals,tasks
+from routers import projects, chat, goals, tasks, resources
 from agents.learning_agent import get_learning_agent
 
 load_dotenv()
@@ -43,6 +42,7 @@ app.include_router(goals.router, prefix="/goals", tags=["Goals"])
 app.include_router(projects.router, prefix="/projects", tags=["Projects"])
 app.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
 app.include_router(chat.router, prefix="/chat", tags=["Chat"])
+app.include_router(resources.router, prefix="/resources", tags=["Resources"])
 
 
 @app.get("/health")

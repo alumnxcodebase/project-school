@@ -47,3 +47,11 @@ class TaskUpdate(BaseModel):
     status: Optional[str] = None
     priority: Optional[str] = None
     assigned_to: Optional[str] = None
+
+class Resource(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
+    id: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    link: str
+    created_at: datetime = Field(default_factory=datetime.now)
