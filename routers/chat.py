@@ -158,7 +158,7 @@ def _is_task_list_response(text: str) -> bool:
     return len(numbered_lines) >= 3  # At least 3 numbered items
 
 
-@router.get("/history/{user_id}", response_model=list[Chat])
+@router.get("/history/{user_id}")
 async def get_chat_history(request: Request, user_id: str):
     """Retrieve chat history for a specific user"""
     db = request.app.state.db
