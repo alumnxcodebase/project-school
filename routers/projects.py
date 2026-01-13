@@ -28,36 +28,25 @@ async def create_new_project(request: Request, project: Project = Body(...)):
 async def get_project_details(request: Request, project_id: str):
     """
     Get project details along with all associated tasks.
-    
-    Returns:
-        - Project information (id, name, description, status, created_at)
-        - List of all tasks belonging to this project
     """
     db = request.app.state.db
     
-    # Validate project_id format
     if not ObjectId.is_valid(project_id):
         raise HTTPException(status_code=400, detail="Invalid Project ID")
 
-    # Fetch project details
     project = await db.projects.find_one({"_id": ObjectId(project_id)})
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
-    # Serialize project (convert _id to id)
     project_data = serialize(project)
     
-    # Fetch all tasks for this project
     tasks_cursor = db.tasks.find({"project_id": project_id})
     tasks = [serialize(task) async for task in tasks_cursor]
     
-    # Combine project data with tasks
     project_with_tasks = {
         **project_data,
         "tasks": tasks
     }
-    
-    print(f"📦 Retrieved project {project_id} with {len(tasks)} tasks")
     
     return project_with_tasks
 

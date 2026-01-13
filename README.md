@@ -11,6 +11,7 @@ A production-ready FastAPI application powered by MongoDB Atlas that supports:
 ---
 
 ## Features
+
 - Projects & Tasks CRUD
 - Goals management
 - AI Agent registry
@@ -22,6 +23,7 @@ A production-ready FastAPI application powered by MongoDB Atlas that supports:
 ---
 
 ## Prerequisites
+
 - Python 3.9+
 - MongoDB Atlas or local MongoDB
 - pip / virtualenv
@@ -58,6 +60,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ---
 
 ## API Docs
+
 - Swagger: http://localhost:8000/docs
 - Health: http://localhost:8000/health
 
@@ -66,6 +69,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ## Core Endpoints
 
 ### Projects
+
 - POST /project
 - GET /project
 - GET /project/{id}
@@ -74,20 +78,24 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 - GET /project/{id}/stats
 
 ### Tasks
+
 - POST /project-tasks
 - GET /project-tasks
 - PUT /project-tasks/{id}
 - DELETE /project-tasks/{id}
 
 ### Goals
+
 - POST /goals
 - GET /goals?userId=
 
 ### AI Agents
+
 - POST /ai-agent
 - GET /ai-agent?userId=
 
 ### Chat
+
 - POST /chat
 - GET /chat/{userId}
 - POST /chat/agent
@@ -95,7 +103,6 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ---
 
 ## License
+
 MIT
-##Changes are made here
-
-
+##Change Made by Bhavana

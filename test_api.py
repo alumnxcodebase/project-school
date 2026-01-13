@@ -3,7 +3,7 @@
 # API Testing Script using cURL
 # Usage: chmod +x test_api.sh && ./test_api.sh
 
-BASE_URL="http://localhost:8000"
+BASE_URL="http://localhost:8001"
 USER_ID="test_user_001"
 
 # Colors
