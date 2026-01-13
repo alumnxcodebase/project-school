@@ -175,13 +175,43 @@ async def manage_agent(request: Request, agent_req: ManageAgentRequest = Body(..
     user_id = agent_req.userId
     agent_name = agent_req.agentName
 
-    print(f"📝 Managing agent for user: {user_id}")
+    print("=" * 80)
+    print(f"📝 MANAGE AGENT REQUEST")
+    print(f"📝 Received userId: {user_id}")
+    print(f"📝 userId type: {type(user_id)}")
+    print(f"📝 userId length: {len(user_id)}")
+    print(f"📝 Agent name: {agent_name}")
+    print("=" * 80)
 
     # Validate agent name
     if not agent_name or not agent_name.strip():
         raise HTTPException(status_code=400, detail="Agent name cannot be empty")
 
+    # Check for existing agents with this userId
+    print(f"🔍 Searching for existing agent with userId: {user_id}")
+    existing_agent = await db.agents.find_one({"userId": user_id})
+    
+    if existing_agent:
+        print(f"✅ Found existing agent:")
+        print(f"   - _id: {existing_agent.get('_id')}")
+        print(f"   - userId: {existing_agent.get('userId')}")
+        print(f"   - agentName: {existing_agent.get('agentName')}")
+        print(f"   - updated_at: {existing_agent.get('updated_at')}")
+    else:
+        print(f"❌ No existing agent found for userId: {user_id}")
+        
+        # Check if there are any agents at all for debugging
+        all_agents_count = await db.agents.count_documents({})
+        print(f"📊 Total agents in collection: {all_agents_count}")
+        
+        if all_agents_count > 0:
+            print(f"🔍 Checking all existing userIds in agents collection:")
+            all_agents = await db.agents.find({}, {"userId": 1, "agentName": 1}).to_list(length=10)
+            for ag in all_agents:
+                print(f"   - userId: '{ag.get('userId')}' (type: {type(ag.get('userId'))}), agentName: '{ag.get('agentName')}'")
+
     # Upsert agent document
+    print(f"💾 Performing upsert for userId: {user_id}")
     result = await db.agents.update_one(
         {"userId": user_id},
         {
@@ -196,14 +226,29 @@ async def manage_agent(request: Request, agent_req: ManageAgentRequest = Body(..
         upsert=True
     )
 
+    print(f"💾 Upsert result:")
+    print(f"   - matched_count: {result.matched_count}")
+    print(f"   - modified_count: {result.modified_count}")
+    print(f"   - upserted_id: {result.upserted_id}")
+
     # Fetch the updated/created agent
     agent = await db.agents.find_one({"userId": user_id})
     
-    print(f"✅ Agent {'updated' if result.modified_count > 0 else 'created'} successfully")
+    if agent:
+        print(f"✅ Final agent state:")
+        print(f"   - _id: {agent.get('_id')}")
+        print(f"   - userId: {agent.get('userId')}")
+        print(f"   - agentName: {agent.get('agentName')}")
+    else:
+        print(f"❌ WARNING: Could not retrieve agent after upsert!")
+    
+    action = "updated" if result.modified_count > 0 else "created"
+    print(f"✅ Agent {action} successfully")
+    print("=" * 80)
     
     return {
         "status": "success",
-        "message": f"Agent name {'updated' if result.modified_count > 0 else 'created'} successfully",
+        "message": f"Agent name {action} successfully",
         "agent": serialize(agent)
     }
 
@@ -216,12 +261,29 @@ async def get_agent(request: Request, agent_req: GetAgentRequest = Body(...)):
     db = request.app.state.db
     user_id = agent_req.userId
 
-    print(f"🔍 Fetching agent for user: {user_id}")
+    print("=" * 80)
+    print(f"🔍 GET AGENT REQUEST")
+    print(f"🔍 Received userId: {user_id}")
+    print(f"🔍 userId type: {type(user_id)}")
+    print(f"🔍 userId length: {len(user_id)}")
+    print("=" * 80)
 
     # Find agent document
     agent = await db.agents.find_one({"userId": user_id})
     
     if not agent:
+        print(f"❌ No agent found for userId: {user_id}")
+        
+        # Debug: show what userIds exist
+        all_agents_count = await db.agents.count_documents({})
+        print(f"📊 Total agents in collection: {all_agents_count}")
+        
+        if all_agents_count > 0:
+            print(f"🔍 Existing userIds in agents collection:")
+            all_agents = await db.agents.find({}, {"userId": 1, "agentName": 1}).to_list(length=10)
+            for ag in all_agents:
+                print(f"   - userId: '{ag.get('userId')}' (type: {type(ag.get('userId'))})")
+        
         # Return default agent name if not found
         return {
             "status": "success",
@@ -232,7 +294,11 @@ async def get_agent(request: Request, agent_req: GetAgentRequest = Body(...)):
             }
         }
     
-    print(f"✅ Agent found: {agent.get('agentName')}")
+    print(f"✅ Agent found:")
+    print(f"   - _id: {agent.get('_id')}")
+    print(f"   - userId: {agent.get('userId')}")
+    print(f"   - agentName: {agent.get('agentName')}")
+    print("=" * 80)
     
     return {
         "status": "success",

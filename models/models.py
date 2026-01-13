@@ -74,7 +74,7 @@ class Chat(BaseModel):
 
 class Goal(BaseModel):
     userId: str
-    goals: List[str]
+    goals: str
 
 class TaskUpdate(BaseModel):
     title: Optional[str] = None

@@ -8,6 +8,8 @@ from langsmith import traceable
 import os
 from dotenv import load_dotenv
 from bson import ObjectId
+import json
+import re
 
 # Load environment variables
 load_dotenv()
@@ -70,6 +72,52 @@ def get_learning_agent(db):
             return await run_learning_agent(self.db, user_id, message)
     
     return SimpleLearningAgent(db)
+
+
+
+def parse_json_from_response(response_text: str) -> list:
+    """
+    Extract JSON array from response text, handling markdown code blocks and nested text.
+    Returns list of task objects with id and title.
+    """
+    try:
+        print(f"\n📊 Parsing response:\n{response_text}\n")
+        
+        # Remove markdown code blocks if present
+        cleaned = response_text.strip()
+        cleaned = re.sub(r'```json\s*', '', cleaned)
+        cleaned = re.sub(r'```\s*', '', cleaned)
+        cleaned = cleaned.strip()
+        
+        # Extract JSON array if it's embedded in text
+        # Look for pattern: [ ... ]
+        json_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(0)
+            print(f"📌 Found JSON match:\n{json_str}\n")
+        else:
+            json_str = cleaned
+            print(f"⚠️ No JSON match pattern found, trying full response\n")
+        
+        # Try to parse JSON
+        tasks = json.loads(json_str)
+        
+        if isinstance(tasks, list):
+            print(f"✅ Successfully parsed {len(tasks)} tasks\n")
+            for i, task in enumerate(tasks, 1):
+                print(f"   Task {i}: {task.get('title')} (ID: {task.get('id')})")
+            return tasks
+        
+        print(f"⚠️ Parsed data is not a list: {type(tasks)}\n")
+        return []
+        
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON Parse Error: {str(e)}")
+        print(f"📝 Attempted to parse:\n{json_str if 'json_str' in locals() else response_text}\n")
+        return []
+    except Exception as e:
+        print(f"❌ Unexpected error during parsing: {str(e)}\n")
+        return []
 
 
 
@@ -239,9 +287,11 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
             print("🎯 MODE: Task Assignment")
             tools = [get_user_goals, get_project_details, get_project_tasks, get_user_assigned_tasks]
             
-            system_prompt = f"""You are {agent_name}, an expert learning path advisor.
+            system_prompt = f"""RESPOND WITH ONLY A JSON ARRAY. DO NOT INCLUDE ANY OTHER TEXT.
 
-Your task:
+You are {agent_name}, an expert learning path advisor.
+
+STEPS:
 1. Use get_user_goals to fetch the user's learning goals
 2. Use get_user_assigned_tasks to fetch tasks already assigned to the user
 3. Use get_project_details for project_id: "695caa41c485455f397017ae"
@@ -257,25 +307,21 @@ CRITICAL RULES:
 - Select exactly 6 NEW tasks that match user's goals
 - Ensure logical learning progression
 
-RESPONSE FORMAT - Return ONLY task titles as a numbered list:
-1. [Task Title 1]
-2. [Task Title 2]
-3. [Task Title 3]
-4. [Task Title 4]
-5. [Task Title 5]
-6. [Task Title 6]
-
-No explanations, just the numbered list of NEW tasks."""
+RESPONSE: Output ONLY this JSON structure with NO other text, NO markdown, NO explanation:
+[
+  {{"id": "actual_task_id", "title": "Actual Task Title"}},
+  {{"id": "actual_task_id", "title": "Actual Task Title"}},
+  {{"id": "actual_task_id", "title": "Actual Task Title"}},
+  {{"id": "actual_task_id", "title": "Actual Task Title"}},
+  {{"id": "actual_task_id", "title": "Actual Task Title"}},
+  {{"id": "actual_task_id", "title": "Actual Task Title"}}
+]"""
 
             user_prompt = f"""User ID: {user_id}
 
-Create my personalized learning path with NEW tasks only:
-1. Fetch my learning goals
-2. Fetch my already assigned tasks (to exclude them)
-3. Fetch project and all tasks
-4. Filter out any tasks I already have assigned
-5. From remaining tasks, select 6 that match my goals in learning order
-6. Return ONLY the numbered list of task titles"""
+Respond with ONLY a JSON array. No text before or after. Exactly 6 tasks with id and title fields.
+
+Get goals → Get assigned tasks → Get all project tasks → Filter → Select 6 best → Return JSON array only."""
             
         else:
             print("💬 MODE: Conversational Career Guidance")
@@ -365,11 +411,48 @@ The user has just updated their goals. Fetch their goals and provide an encourag
         print(f"{'='*60}\n")
         print(f"Response:\n{final_response}\n")
         
-        return {
-            "response_text": final_response,
-            "status": "success",
-            "messages": result["messages"]
-        }
+
+        # If task assignment mode, parse JSON and return structured tasks
+        if is_task_assignment_mode:
+            print(f"\n🔍 TASK ASSIGNMENT MODE - Parsing response")
+            print(f"📝 Raw response text:\n{final_response}\n")
+            
+            parsed_tasks = parse_json_from_response(final_response)
+            print(f"✅ Parsed {len(parsed_tasks)} tasks from agent response\n")
+            
+            # Get project info for response
+            project_doc = await db.projects.find_one({"_id": ObjectId("695caa41c485455f397017ae")})
+            project_name = project_doc.get("name", "Project School") if project_doc else "Project School"
+            project_id = "695caa41c485455f397017ae"
+            
+            print(f"📦 Project: {project_name} ({project_id})\n")
+            
+            # Enrich tasks with project information
+            enriched_tasks = []
+            for task in parsed_tasks:
+                enriched_task = {
+                    "taskId": task.get("id"),
+                    "taskName": task.get("title"),
+                    "projectId": project_id,
+                    "projectName": project_name
+                }
+                enriched_tasks.append(enriched_task)
+                print(f"   ✓ {enriched_task['taskName']}")
+            
+            print(f"\n📤 Returning {len(enriched_tasks)} enriched tasks\n")
+            
+            return {
+                "response_text": f"I've selected {len(enriched_tasks)} personalized tasks for your learning path. Here they are:",
+                "status": "success",
+                "tasks": enriched_tasks,
+                "messages": result["messages"]
+            }
+        else:
+            return {
+                "response_text": final_response,
+                "status": "success",
+                "messages": result["messages"]
+            }
 
         
     except Exception as e:
