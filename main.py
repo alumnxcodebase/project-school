@@ -5,52 +5,58 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
-from routers import projects, chat, goals,tasks
+
+from routers import projects, chat, goals, tasks, resources
 from agents.learning_agent import get_learning_agent
+
 
 load_dotenv()
 
 
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # DB Setup
-    client = AsyncIOMotorClient(os.getenv("MONGODB_URL"))
-    db = client[os.getenv("DATABASE_NAME", "projects")]
-    app.state.db = db
-
-    # Initialize Agent
-    app.state.agent = get_learning_agent(db)
-
-    # Indexes
-    await db.chats.create_index([("userId", 1), ("timestamp", 1)])
-
-    print("🚀 API and Agent Ready")
-    yield
-    client.close()
+   # DB Setup
+   client = AsyncIOMotorClient(os.getenv("MONGODB_URL"))
+   db = client[os.getenv("DATABASE_NAME", "projects")]
+   app.state.db = db
 
 
-app = FastAPI(title="Project + Agentic AI API", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Include Routers
-app.include_router(goals.router, prefix="/goals", tags=["Goals"])
-app.include_router(projects.router, prefix="/projects", tags=["Projects"])
-app.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
-app.include_router(chat.router, prefix="/chat", tags=["Chat"])
+   # Initialize Agent
+   app.state.agent = get_learning_agent(db)
 
 
-@app.get("/health")
-async def health():
-    return {"status": "healthy", "timestamp": "2026-01-06T15:24:00Z"}
+   # Indexes
+   await db.chats.create_index([("userId", 1), ("timestamp", 1)])
+  
+   # Create unique index on agents collection to prevent duplicate userId entries
+   print("🔧 Creating unique index on agents.userId...")
+   try:
+       await db.agents.create_index([("userId", 1)], unique=True)
+       print("✅ Unique index on agents.userId created successfully")
+   except Exception as e:
+       # Index might already exist, that's okay
+       print(f"ℹ️  Agents index: {str(e)}")
+  
+   # Create indexes for resources collection
+   print("🔧 Creating indexes on resources collection...")
+   try:
+       await db.resources.create_index([("taskId", 1)])
+       await db.resources.create_index([("projectId", 1)])
+       await db.resources.create_index([("userId", 1)])
+       print("✅ Resources indexes created successfully")
+   except Exception as e:
+       print(f"ℹ️  Resources indexes: {str(e)}")
 
 
-if __name__ == "__main__":
-    import uvicorn
+   # Create indexes for resources collection
+   print("🔧 Creating indexes on resources collection...")
+   try:
+       await db.resources.create_index([("name", 1)])
+       print("✅ Resources indexes created successfully")
+   except Exception as e:
+       print(f"ℹ️  Resources indexes: {str(e)}")
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
+
+   print("🚀 API and Agent Ready")
