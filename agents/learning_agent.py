@@ -223,7 +223,10 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
         async def get_project_tasks(project_id: str) -> list:
             """Fetch all tasks for a specific project."""
             try:
-                print(f"🔍 Fetching tasks for project: {project_id}")
+                print(f"\n{'='*60}")
+                print(f"🔍 FETCHING ALL TASKS FOR PROJECT: {project_id}")
+                print(f"{'='*60}")
+                
                 tasks_cursor = db.tasks.find({"project_id": project_id})
                 tasks = await tasks_cursor.to_list(length=None)
 
@@ -236,10 +239,24 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
                     }
                     for task in tasks
                 ]
-                print(f"✅ Found {len(result)} tasks")
+                
+                print(f"\n📋 AVAILABLE TASKS IN PROJECT:")
+                print(f"{'-'*60}")
+                for i, task in enumerate(result, 1):
+                    print(f"{i}. {task['title']}")
+                    print(f"   ID: {task['id']}")
+                    print(f"   Description: {task['description'][:80]}...")
+                    print()
+                
+                print(f"{'-'*60}")
+                print(f"✅ Total tasks in project: {len(result)}")
+                print(f"{'='*60}\n")
+                
                 return result
             except Exception as e:
                 print(f"❌ Error: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 return [{"error": str(e)}]
 
         @tool
@@ -321,41 +338,53 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
                 get_user_assigned_tasks,
             ]
         
-            system_prompt = f"""RESPOND WITH ONLY A JSON ARRAY. DO NOT INCLUDE ANY OTHER TEXT.
+            system_prompt = f"""You are {agent_name}, an expert learning path advisor.
 
-            You are {agent_name}, an expert learning path advisor.
+            CRITICAL INSTRUCTION: You MUST ONLY select tasks that exist in the project. Do NOT make up or create new tasks.
 
-            STEPS:
-            1. Use get_user_goals to fetch the user's learning goals
-            2. Use get_user_assigned_tasks to fetch tasks already assigned to the user
-            3. Use get_project_details for project_id: "695caa41c485455f397017ae"
-            4. Use get_project_tasks to fetch ALL tasks from the project
-            5. Filter OUT any tasks whose ID appears in the assigned_task_ids list
-            6. From the remaining UNASSIGNED tasks, select exactly 6 tasks
-            7. Analyze user goals vs the unassigned tasks (title + description)
-            8. Select tasks in progressive order (foundation → intermediate → advanced)
+            STEPS TO FOLLOW:
+            1. Call get_user_goals(user_id="{user_id}") to fetch user's goals
+            2. Call get_user_assigned_tasks(user_id="{user_id}") to get assigned task IDs
+            3. Call get_project_details(project_id="695caa41c485455f397017ae")
+            4. Call get_project_tasks(project_id="695caa41c485455f397017ae") to get ALL available tasks
+            5. From the project tasks, FILTER OUT tasks whose ID is in assigned_task_ids
+            6. From the REMAINING tasks (NOT assigned yet), select EXACTLY 6 tasks
+            7. Match selected tasks to user's goals
+            8. Return ONLY those 6 tasks in JSON format
 
-            CRITICAL RULES:
-            - NEVER recommend tasks that are already in assigned_task_ids
-            - ONLY suggest tasks from the project that the user has NOT been assigned yet
-            - Select exactly 6 NEW tasks that match user's goals
-            - Ensure logical learning progression
+            ABSOLUTE RULES - NEVER VIOLATE:
+            ❌ DO NOT create fictional tasks (e.g., "Quantum Computing" if not in project)
+            ❌ DO NOT modify task titles or IDs
+            ❌ DO NOT suggest tasks already in assigned_task_ids
+            ✅ ONLY use task IDs and titles EXACTLY as returned by get_project_tasks
+            ✅ Select from UNASSIGNED tasks only
+            ✅ Return exactly 6 tasks
 
-            RESPONSE: Output ONLY this JSON structure with NO other text, NO markdown, NO explanation:
+            OUTPUT FORMAT - RESPOND WITH ONLY THIS JSON:
             [
-            {{"id": "actual_task_id", "title": "Actual Task Title"}},
-            {{"id": "actual_task_id", "title": "Actual Task Title"}},
-            {{"id": "actual_task_id", "title": "Actual Task Title"}},
-            {{"id": "actual_task_id", "title": "Actual Task Title"}},
-            {{"id": "actual_task_id", "title": "Actual Task Title"}},
-            {{"id": "actual_task_id", "title": "Actual Task Title"}}
-            ]"""
+            {{"id": "actual_task_id_from_project", "title": "Actual Task Title from project"}},
+            {{"id": "actual_task_id_from_project", "title": "Actual Task Title from project"}},
+            {{"id": "actual_task_id_from_project", "title": "Actual Task Title from project"}},
+            {{"id": "actual_task_id_from_project", "title": "Actual Task Title from project"}},
+            {{"id": "actual_task_id_from_project", "title": "Actual Task Title from project"}},
+            {{"id": "actual_task_id_from_project", "title": "Actual Task Title from project"}}
+            ]
+            
+            NO markdown, NO explanation, NO other text - ONLY the JSON array."""
 
             user_prompt = f"""User ID: {user_id}
+Project ID: 695caa41c485455f397017ae
 
-            Respond with ONLY a JSON array. No text before or after. Exactly 6 tasks with id and title fields.
+Execute the steps:
+1. Get user goals
+2. Get assigned tasks
+3. Get project details  
+4. Get all project tasks
+5. Filter out assigned tasks
+6. Select 6 best unassigned tasks for user's goals
+7. Return ONLY JSON array with those 6 tasks
 
-            Get goals → Get assigned tasks → Get all project tasks → Filter → Select 6 best → Return JSON array only."""
+Remember: Use ONLY tasks from get_project_tasks response. Do NOT invent tasks."""
 
         else:
             print("💬 MODE: Conversational Career Guidance")
@@ -395,16 +424,16 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
             - Keep responses concise (2-3 paragraphs max)
             - End with a follow-up question to continue the conversation"""
 
-        if user_message:
-            user_prompt = f"""User message: {user_message}
+            if user_message:
+                user_prompt = f"""User message: {user_message}
 
-            User ID: {user_id}
+User ID: {user_id}
 
-            Please respond to the user's question. First, fetch their learning goals to provide personalized advice."""
-        else:
-            user_prompt = f"""User ID: {user_id}
+Please respond to the user's question. First, fetch their learning goals to provide personalized advice."""
+            else:
+                user_prompt = f"""User ID: {user_id}
 
-            The user has just updated their goals. Fetch their goals and provide an encouraging welcome message about their learning journey."""
+The user has just updated their goals. Fetch their goals and provide an encouraging welcome message about their learning journey."""
 
         print("🤖 Creating LangGraph ReAct agent...\n")
 
@@ -459,48 +488,53 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
             parsed_tasks = parse_json_from_response(final_response)
             print(f"✅ Parsed {len(parsed_tasks)} tasks from agent response\n")
 
-            # Server-side duplicate filtering (backup to LLM filtering)
+            # Server-side validation: Verify tasks exist in project
             print(f"\n{'='*60}")
-            print(f"🛡️ SERVER-SIDE DUPLICATE CHECK")
+            print(f"🛡️ SERVER-SIDE VALIDATION")
             print(f"{'='*60}")
-
+            
+            # Get all project tasks for validation
+            project_tasks_cursor = db.tasks.find({"project_id": "695caa41c485455f397017ae"})
+            all_project_tasks = await project_tasks_cursor.to_list(length=None)
+            valid_task_ids = {str(task["_id"]) for task in all_project_tasks}
+            
+            print(f"\n📦 Project has {len(valid_task_ids)} total tasks")
+            print(f"🔍 Validating {len(parsed_tasks)} suggested tasks...\n")
+            
+            # Filter out hallucinated tasks
+            validated_tasks = []
+            hallucinated_tasks = []
+            
+            for task in parsed_tasks:
+                task_id = str(task.get("id", ""))
+                if task_id in valid_task_ids:
+                    validated_tasks.append(task)
+                    print(f"✅ VALID: {task.get('title')} (ID: {task_id})")
+                else:
+                    hallucinated_tasks.append(task)
+                    print(f"❌ INVALID/HALLUCINATED: {task.get('title')} (ID: {task_id})")
+            
+            if hallucinated_tasks:
+                print(f"\n⚠️ WARNING: LLM hallucinated {len(hallucinated_tasks)} tasks!")
+                print(f"   Filtered them out. Using only {len(validated_tasks)} valid tasks.")
+            
+            # Also check for duplicates with assigned tasks
             assignment = await db.assignments.find_one({"userId": user_id})
             if assignment and assignment.get("tasks"):
-                # Get all assigned task IDs as strings for comparison
                 assigned_ids = {str(t.get("taskId")) for t in assignment.get("tasks", []) if t.get("taskId")}
                 
-                print(f"\n📋 Currently Assigned Tasks:")
-                for task in assignment.get("tasks", []):
-                    status = "✅ COMPLETED" if task.get("isCompleted") else "⏳ PENDING"
-                    print(f"   {status}: {task.get('taskName')} (ID: {task.get('taskId')})")
+                print(f"\n🚫 Checking for duplicates with {len(assigned_ids)} assigned tasks...")
                 
-                print(f"\n🔍 Checking {len(parsed_tasks)} suggested tasks for duplicates...")
+                original_count = len(validated_tasks)
+                validated_tasks = [
+                    task for task in validated_tasks 
+                    if str(task.get("id")) not in assigned_ids
+                ]
                 
-                # Find duplicates
-                suggested_ids = {str(task.get("id")) for task in parsed_tasks if task.get("id")}
-                duplicates = assigned_ids.intersection(suggested_ids)
-                
-                if duplicates:
-                    print(f"\n⚠️ FOUND {len(duplicates)} DUPLICATE TASKS:")
-                    for dup_id in duplicates:
-                        dup_task = next((t for t in parsed_tasks if str(t.get("id")) == dup_id), None)
-                        if dup_task:
-                            print(f"   - {dup_task.get('title')} (ID: {dup_id})")
-                    
-                    # Filter out duplicates
-                    original_count = len(parsed_tasks)
-                    parsed_tasks = [
-                        task for task in parsed_tasks 
-                        if str(task.get("id")) not in assigned_ids
-                    ]
-                    
-                    print(f"\n🔧 FILTERED: Removed {original_count - len(parsed_tasks)} duplicate tasks")
-                    print(f"   Remaining suggestions: {len(parsed_tasks)}")
-                else:
-                    print(f"✅ No duplicates found - all tasks are new!")
-            else:
-                print(f"✅ No existing assignments - all tasks are new!")
-
+                if original_count != len(validated_tasks):
+                    print(f"⚠️ Removed {original_count - len(validated_tasks)} duplicate tasks")
+            
+            print(f"\n✅ Final validated tasks: {len(validated_tasks)}")
             print(f"{'='*60}\n")
 
             # Get project info for response
@@ -518,7 +552,7 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
 
             # Enrich tasks with project information
             enriched_tasks = []
-            for task in parsed_tasks:
+            for task in validated_tasks:
                 enriched_task = {
                     "taskId": task.get("id"),
                     "taskName": task.get("title"),
@@ -528,21 +562,14 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
                 enriched_tasks.append(enriched_task)
                 print(f"   ✓ {enriched_task['taskName']}")
 
-            print(f"\n📤 Returning {len(enriched_tasks)} enriched tasks\n")
+            print(f"\n📤 Returning {len(enriched_tasks)} validated tasks\n")
             
-            # Debug: Verify enriched_tasks before returning
-            print(f"🔍 DEBUG: enriched_tasks length = {len(enriched_tasks)}")
-            print(f"🔍 DEBUG: enriched_tasks = {enriched_tasks}\n")
-            
-
             response_obj = {
                 "response_text": f"I've selected {len(enriched_tasks)} personalized tasks for your learning path. Here they are:",
                 "status": "success",
                 "tasks": enriched_tasks,
                 "messages": result["messages"],
             }
-            
-            print(f"🔍 DEBUG: Final response_obj['tasks'] length = {len(response_obj.get('tasks', []))}")
             
             return response_obj
         else:
@@ -551,10 +578,6 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
                 "status": "success",
                 "messages": result["messages"],
             }
-            
-            print(f"🔍 DEBUG: Final response_obj['tasks'] length = {len(response_obj.get('tasks', []))}")
-            
-            return response_obj
 
     except Exception as e:
         print(f"\n❌ ERROR: {str(e)}")
