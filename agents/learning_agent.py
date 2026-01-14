@@ -246,32 +246,59 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
         async def get_user_assigned_tasks(user_id: str) -> dict:
             """Fetch all tasks already assigned to the user (both completed and pending)."""
             try:
-                print(f"🔍 Fetching assigned tasks for user: {user_id}")
+                print(f"\n{'='*60}")
+                print(f"🔍 FETCHING ASSIGNED TASKS FOR USER: {user_id}")
+                print(f"{'='*60}")
+                
                 assignment = await db.assignments.find_one({"userId": user_id})
 
                 if not assignment or not assignment.get("tasks"):
                     print("✅ No tasks assigned to user yet")
+                    print(f"{'='*60}\n")
                     return {"assigned_task_ids": [], "completed_task_ids": []}
 
                 assigned_task_ids = []
                 completed_task_ids = []
 
-                for task in assignment.get("tasks", []):
+                print(f"\n📋 TASK DETAILS:")
+                print(f"{'-'*60}")
+                
+                for idx, task in enumerate(assignment.get("tasks", []), 1):
                     task_id = task.get("taskId")
+                    task_name = task.get("taskName", "Unknown")
+                    is_completed = task.get("isCompleted", False)
+                    
                     if task_id:
                         assigned_task_ids.append(task_id)
-                        if task.get("isCompleted", False):
+                        status_emoji = "✅" if is_completed else "⏳"
+                        status_text = "COMPLETED" if is_completed else "PENDING"
+                        
+                        print(f"{status_emoji} Task {idx}: [{status_text}]")
+                        print(f"   ID: {task_id}")
+                        print(f"   Name: {task_name}")
+                        print()
+                        
+                        if is_completed:
                             completed_task_ids.append(task_id)
 
-                print(
-                    f"✅ User has {len(assigned_task_ids)} assigned tasks ({len(completed_task_ids)} completed)"
-                )
+                print(f"{'-'*60}")
+                print(f"📊 SUMMARY:")
+                print(f"   Total assigned: {len(assigned_task_ids)}")
+                print(f"   Completed: {len(completed_task_ids)}")
+                print(f"   Pending: {len(assigned_task_ids) - len(completed_task_ids)}")
+                print(f"\n🚫 FILTER OUT THESE TASK IDs:")
+                for task_id in assigned_task_ids:
+                    print(f"   - {task_id}")
+                print(f"{'='*60}\n")
+                
                 return {
                     "assigned_task_ids": assigned_task_ids,
                     "completed_task_ids": completed_task_ids,
                 }
             except Exception as e:
                 print(f"❌ Error: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 return {
                     "error": str(e),
                     "assigned_task_ids": [],
@@ -293,7 +320,7 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
                 get_project_tasks,
                 get_user_assigned_tasks,
             ]
-
+        
             system_prompt = f"""RESPOND WITH ONLY A JSON ARRAY. DO NOT INCLUDE ANY OTHER TEXT.
 
             You are {agent_name}, an expert learning path advisor.
@@ -431,6 +458,50 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
 
             parsed_tasks = parse_json_from_response(final_response)
             print(f"✅ Parsed {len(parsed_tasks)} tasks from agent response\n")
+
+            # Server-side duplicate filtering (backup to LLM filtering)
+            print(f"\n{'='*60}")
+            print(f"🛡️ SERVER-SIDE DUPLICATE CHECK")
+            print(f"{'='*60}")
+
+            assignment = await db.assignments.find_one({"userId": user_id})
+            if assignment and assignment.get("tasks"):
+                # Get all assigned task IDs as strings for comparison
+                assigned_ids = {str(t.get("taskId")) for t in assignment.get("tasks", []) if t.get("taskId")}
+                
+                print(f"\n📋 Currently Assigned Tasks:")
+                for task in assignment.get("tasks", []):
+                    status = "✅ COMPLETED" if task.get("isCompleted") else "⏳ PENDING"
+                    print(f"   {status}: {task.get('taskName')} (ID: {task.get('taskId')})")
+                
+                print(f"\n🔍 Checking {len(parsed_tasks)} suggested tasks for duplicates...")
+                
+                # Find duplicates
+                suggested_ids = {str(task.get("id")) for task in parsed_tasks if task.get("id")}
+                duplicates = assigned_ids.intersection(suggested_ids)
+                
+                if duplicates:
+                    print(f"\n⚠️ FOUND {len(duplicates)} DUPLICATE TASKS:")
+                    for dup_id in duplicates:
+                        dup_task = next((t for t in parsed_tasks if str(t.get("id")) == dup_id), None)
+                        if dup_task:
+                            print(f"   - {dup_task.get('title')} (ID: {dup_id})")
+                    
+                    # Filter out duplicates
+                    original_count = len(parsed_tasks)
+                    parsed_tasks = [
+                        task for task in parsed_tasks 
+                        if str(task.get("id")) not in assigned_ids
+                    ]
+                    
+                    print(f"\n🔧 FILTERED: Removed {original_count - len(parsed_tasks)} duplicate tasks")
+                    print(f"   Remaining suggestions: {len(parsed_tasks)}")
+                else:
+                    print(f"✅ No duplicates found - all tasks are new!")
+            else:
+                print(f"✅ No existing assignments - all tasks are new!")
+
+            print(f"{'='*60}\n")
 
             # Get project info for response
             project_doc = await db.projects.find_one(
