@@ -625,7 +625,12 @@ The user has just updated their goals. Fetch their goals and provide an encourag
             if len(enriched_tasks) == 0:
                 message_text = "Looks like your Study Plan has not been prepared as yet. Please connect with Vijender asap."
             else:
-                message_text = f"I've selected {len(enriched_tasks)} personalized tasks for your learning path. Here they are:"
+                # Format tasks in the message text for WhatsApp
+                message_text = f"I've selected {len(enriched_tasks)} personalized tasks for your learning path:\n\n"
+                for idx, task in enumerate(enriched_tasks, 1):
+                    message_text += f"{idx}. *{task['taskName']}*\n"
+                    message_text += f"   Project: {task['projectName']}\n"
+                    message_text += f"   Task ID: {task['taskId']}\n\n"
             
             response_obj = {
                 "message": message_text,
