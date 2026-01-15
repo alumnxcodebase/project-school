@@ -20,7 +20,7 @@ class Comment(BaseModel):
 
 class Task(BaseModel):
     model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
-    id: Optional[str] = None
+    
     project_id: str
     title: str
     description: Optional[str] = None
@@ -74,7 +74,7 @@ class Chat(BaseModel):
 
 class Goal(BaseModel):
     userId: str
-    goals: List[str]
+    goals: str
 
 class TaskUpdate(BaseModel):
     title: Optional[str] = None

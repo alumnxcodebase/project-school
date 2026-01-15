@@ -34,55 +34,6 @@ def serialize(doc):
     return doc
 
 
-def parse_agent_response_to_tasks(response_text: str) -> List[Dict[str, Any]]:
-    """
-    Parse the agent's response text to extract tasks.
-    Expected format: numbered list like "1. Task description 2. Another task..."
-    Returns a list of task objects with taskId and name.
-    """
-    tasks = []
-    
-    # Split by newlines first to handle multi-line format
-    lines = response_text.strip().split('\n')
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-            
-        # Try to match numbered format: "1. Task name" or "1) Task name"
-        import re
-        match = re.match(r'^(\d+)[.\)]\s*(.+)$', line)
-        
-        if match:
-            task_number = match.group(1)
-            task_description = match.group(2).strip()
-            
-            # Generate a taskId (you might want to use actual task IDs from your database)
-            # For now, using a simple format: "suggested_task_{number}"
-            task_id = f"suggested_task_{task_number}"
-            
-            tasks.append({
-                "taskId": task_id,
-                "name": task_description,
-                "isSuggested": True  # Flag to indicate this is an AI-suggested task
-            })
-    
-    # Fallback: if no numbered items found, try splitting by common delimiters
-    if not tasks:
-        # Try splitting by numbers followed by period/parenthesis
-        parts = re.split(r'\d+[.\)]\s*', response_text)
-        for i, part in enumerate(parts[1:], 1):  # Skip first empty part
-            if part.strip():
-                tasks.append({
-                    "taskId": f"suggested_task_{i}",
-                    "name": part.strip(),
-                    "isSuggested": True
-                })
-    
-    return tasks
-
-
 @router.post("/agent", status_code=200)
 async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...)):
     """
@@ -112,14 +63,9 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
             agent_response = result.get("response_text", "I couldn't process your request.")
             status = result.get("status", "error")
             
-            # Parse the response to extract tasks only if it looks like a task list
-            print("🔍 Parsing response for tasks...")
-            if _is_task_list_response(agent_response):
-                tasks = parse_agent_response_to_tasks(agent_response)
-                print(f"✅ Extracted {len(tasks)} tasks from response")
-            else:
-                tasks = []
-                print("ℹ️ Response is conversational (no tasks to extract)")
+            # Get tasks directly from result if they exist
+            tasks = result.get("tasks", [])
+            print(f"✅ Retrieved {len(tasks)} tasks from agent result")
         
         print(f"✅ Agent completed with status: {status}")
     except Exception as e:
@@ -149,13 +95,6 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
         "tasks": tasks,  # Add tasks array to response
         "status": status
     }
-
-
-def _is_task_list_response(text: str) -> bool:
-    """Check if response looks like a task list (has numbered items)"""
-    lines = text.strip().split('\n')
-    numbered_lines = [l for l in lines if l.strip() and l.strip()[0].isdigit()]
-    return len(numbered_lines) >= 3  # At least 3 numbered items
 
 
 @router.get("/history/{user_id}")
@@ -204,13 +143,43 @@ async def manage_agent(request: Request, agent_req: ManageAgentRequest = Body(..
     user_id = agent_req.userId
     agent_name = agent_req.agentName
 
-    print(f"📝 Managing agent for user: {user_id}")
+    print("=" * 80)
+    print(f"🔍 MANAGE AGENT REQUEST")
+    print(f"🔍 Received userId: {user_id}")
+    print(f"🔍 userId type: {type(user_id)}")
+    print(f"🔍 userId length: {len(user_id)}")
+    print(f"🔍 Agent name: {agent_name}")
+    print("=" * 80)
 
     # Validate agent name
     if not agent_name or not agent_name.strip():
         raise HTTPException(status_code=400, detail="Agent name cannot be empty")
 
+    # Check for existing agents with this userId
+    print(f"🔍 Searching for existing agent with userId: {user_id}")
+    existing_agent = await db.agents.find_one({"userId": user_id})
+    
+    if existing_agent:
+        print(f"✅ Found existing agent:")
+        print(f"   - _id: {existing_agent.get('_id')}")
+        print(f"   - userId: {existing_agent.get('userId')}")
+        print(f"   - agentName: {existing_agent.get('agentName')}")
+        print(f"   - updated_at: {existing_agent.get('updated_at')}")
+    else:
+        print(f"❌ No existing agent found for userId: {user_id}")
+        
+        # Check if there are any agents at all for debugging
+        all_agents_count = await db.agents.count_documents({})
+        print(f"📊 Total agents in collection: {all_agents_count}")
+        
+        if all_agents_count > 0:
+            print(f"🔍 Checking all existing userIds in agents collection:")
+            all_agents = await db.agents.find({}, {"userId": 1, "agentName": 1}).to_list(length=10)
+            for ag in all_agents:
+                print(f"   - userId: '{ag.get('userId')}' (type: {type(ag.get('userId'))}), agentName: '{ag.get('agentName')}'")
+
     # Upsert agent document
+    print(f"💾 Performing upsert for userId: {user_id}")
     result = await db.agents.update_one(
         {"userId": user_id},
         {
@@ -225,14 +194,29 @@ async def manage_agent(request: Request, agent_req: ManageAgentRequest = Body(..
         upsert=True
     )
 
+    print(f"💾 Upsert result:")
+    print(f"   - matched_count: {result.matched_count}")
+    print(f"   - modified_count: {result.modified_count}")
+    print(f"   - upserted_id: {result.upserted_id}")
+
     # Fetch the updated/created agent
     agent = await db.agents.find_one({"userId": user_id})
     
-    print(f"✅ Agent {'updated' if result.modified_count > 0 else 'created'} successfully")
+    if agent:
+        print(f"✅ Final agent state:")
+        print(f"   - _id: {agent.get('_id')}")
+        print(f"   - userId: {agent.get('userId')}")
+        print(f"   - agentName: {agent.get('agentName')}")
+    else:
+        print(f"❌ WARNING: Could not retrieve agent after upsert!")
+    
+    action = "updated" if result.modified_count > 0 else "created"
+    print(f"✅ Agent {action} successfully")
+    print("=" * 80)
     
     return {
         "status": "success",
-        "message": f"Agent name {'updated' if result.modified_count > 0 else 'created'} successfully",
+        "message": f"Agent name {action} successfully",
         "agent": serialize(agent)
     }
 
@@ -245,12 +229,29 @@ async def get_agent(request: Request, agent_req: GetAgentRequest = Body(...)):
     db = request.app.state.db
     user_id = agent_req.userId
 
-    print(f"🔍 Fetching agent for user: {user_id}")
+    print("=" * 80)
+    print(f"🔍 GET AGENT REQUEST")
+    print(f"🔍 Received userId: {user_id}")
+    print(f"🔍 userId type: {type(user_id)}")
+    print(f"🔍 userId length: {len(user_id)}")
+    print("=" * 80)
 
     # Find agent document
     agent = await db.agents.find_one({"userId": user_id})
     
     if not agent:
+        print(f"❌ No agent found for userId: {user_id}")
+        
+        # Debug: show what userIds exist
+        all_agents_count = await db.agents.count_documents({})
+        print(f"📊 Total agents in collection: {all_agents_count}")
+        
+        if all_agents_count > 0:
+            print(f"🔍 Existing userIds in agents collection:")
+            all_agents = await db.agents.find({}, {"userId": 1, "agentName": 1}).to_list(length=10)
+            for ag in all_agents:
+                print(f"   - userId: '{ag.get('userId')}' (type: {type(ag.get('userId'))})")
+        
         # Return default agent name if not found
         return {
             "status": "success",
@@ -261,7 +262,11 @@ async def get_agent(request: Request, agent_req: GetAgentRequest = Body(...)):
             }
         }
     
-    print(f"✅ Agent found: {agent.get('agentName')}")
+    print(f"✅ Agent found:")
+    print(f"   - _id: {agent.get('_id')}")
+    print(f"   - userId: {agent.get('userId')}")
+    print(f"   - agentName: {agent.get('agentName')}")
+    print("=" * 80)
     
     return {
         "status": "success",
