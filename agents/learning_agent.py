@@ -248,7 +248,7 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
             if not goals_doc or not goals_doc.get("goals"):
                 print("⚠️ No goals found for user")
                 return {
-                    "message": "Looks like your Goals have not been updated as yet. Please update them in Project School in the top right corner. Refer to https://alumnx.com/project-school",
+                    "message": "Looks like your goals are not yet set. Please update them in Project School. If you need help reach out to Vijender.",
                     "status": "no_goals",
                     "tasks": []
                 }
