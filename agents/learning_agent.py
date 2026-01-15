@@ -1,8 +1,10 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langsmith import traceable
+
 import os
 from dotenv import load_dotenv
 from bson import ObjectId
@@ -51,6 +53,7 @@ async def handle_agent_name_update(db, user_id: str, message: str) -> str:
 
 
 def get_learning_agent(db):
+
     """
     Initialize and return the learning agent.
     This function exists for compatibility with your existing code.
@@ -64,11 +67,13 @@ def get_learning_agent(db):
         def __init__(self, database):
             self.db = database
 
+        
         async def ainvoke(self, user_id: str, message: str = None):
             """Invoke the agent for a specific user."""
             return await run_learning_agent(self.db, user_id, message)
 
     return SimpleLearningAgent(db)
+
 
 
 def parse_json_from_response(response_text: str) -> list:
@@ -118,6 +123,7 @@ def parse_json_from_response(response_text: str) -> list:
         return []
 
 
+
 @traceable(name="Learning Agent", tags=["agent", "career-guidance"])
 async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict:
     """
@@ -151,7 +157,10 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
             raise ValueError("GOOGLE_API_KEY not found")
 
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash-exp", temperature=0.7, google_api_key=api_key
+            model="gemini-2.0-flash-exp",
+            temperature=0.7,
+            google_api_key=api_key
+
         )
 
         print("✅ LLM initialized")
@@ -479,6 +488,7 @@ The user has just updated their goals. Fetch their goals and provide an encourag
         print(f"✅ Agent completed successfully")
         print(f"{'='*60}\n")
         print(f"Response:\n{final_response}\n")
+        
 
         # If task assignment mode, parse JSON and return structured tasks
         if is_task_assignment_mode:
@@ -579,9 +589,14 @@ The user has just updated their goals. Fetch their goals and provide an encourag
                 "messages": result["messages"],
             }
 
+        
     except Exception as e:
         print(f"\n❌ ERROR: {str(e)}")
         import traceback
 
         traceback.print_exc()
-        return {"response_text": f"An error occurred: {str(e)}", "status": "error"}
+        return {
+            "response_text": f"An error occurred: {str(e)}",
+            "status": "error"
+        }
+
