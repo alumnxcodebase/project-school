@@ -47,7 +47,7 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
 
     print(f"🚀 Agent invoked for user: {user_id}")
     if message:
-        print(f"📝 With message: {message}")
+        print(f"💬 With message: {message}")
 
     try:
         # Check if this is an agent name update message
@@ -60,7 +60,9 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
             # Regular learning agent invocation with optional message
             print("⚙️ Running learning agent...")
             result = await run_learning_agent(db, user_id, message)
-            agent_response = result.get("response_text", "I couldn't process your request.")
+            
+            # FIXED: Changed from "response_text" to "message"
+            agent_response = result.get("message", "I couldn't process your request.")
             status = result.get("status", "error")
             
             # Get tasks directly from result if they exist
