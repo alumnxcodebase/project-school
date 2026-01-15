@@ -196,22 +196,6 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
         print(f"📝 User message: {user_message}")
         print(f"{'='*60}\n")
 
-        # CRITICAL: Check if user exists in database first
-        from bson.errors import InvalidId
-        try:
-            user_exists = await db.users.find_one({"_id": ObjectId(user_id)})
-        except InvalidId:
-            # If user_id is not a valid ObjectId, user doesn't exist
-            user_exists = None
-            
-        if not user_exists:
-            print(f"⚠️ User {user_id} not found in database")
-            return {
-                "message": "Looks like you are not a member of the Project School.",
-                "status": "user_not_found",
-                "tasks": []
-            }
-
         # Get agent name for personalized responses
         agent_doc = await db.agents.find_one({"userId": user_id})
         agent_name = (
