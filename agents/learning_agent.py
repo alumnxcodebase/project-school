@@ -123,6 +123,70 @@ def parse_json_from_response(response_text: str) -> list:
         return []
 
 
+async def classify_user_intent(llm, user_message: str) -> str:
+    """
+    Classify user intent using LLM.
+    
+    Returns:
+        - "task_assignment": User wants task recommendations based on goals
+        - "general_conversation": General career/learning questions
+    """
+    try:
+        print(f"\n🎯 Classifying intent for message: {user_message}")
+        
+        intent_prompt = f"""Classify the user's intent into one of these categories:
+
+1. "task_assignment" - User has updated their goals and wants personalized task recommendations. Examples:
+   - "Updated the goals. Share the revised tasks."
+   - "I've set my goals, what tasks should I work on?"
+   - "Based on my new goals, recommend tasks"
+   - "Show me tasks for my learning path"
+
+2. "general_conversation" - User is asking general career/learning questions. Examples:
+   - "What skills do I need for data science?"
+   - "How do I prepare for ML interviews?"
+   - "What's the roadmap to become an AI engineer?"
+   - "Can you help me with my resume?"
+
+User message: "{user_message}"
+
+Respond with ONLY one word: either "task_assignment" or "general_conversation"
+"""
+
+        result = await llm.ainvoke([HumanMessage(content=intent_prompt)])
+        intent = result.content.strip().lower()
+        
+        # Handle list content from Gemini
+        if isinstance(intent, list):
+            content_parts = []
+            for part in intent:
+                if isinstance(part, str):
+                    content_parts.append(part)
+                elif hasattr(part, "text"):
+                    content_parts.append(part.text)
+                else:
+                    content_parts.append(str(part))
+            intent = "".join(content_parts).strip().lower()
+        
+        # Validate intent
+        if "task_assignment" in intent:
+            intent = "task_assignment"
+        elif "general_conversation" in intent:
+            intent = "general_conversation"
+        else:
+            # Default to general conversation if unclear
+            intent = "general_conversation"
+        
+        print(f"✅ Classified intent: {intent}\n")
+        return intent
+        
+    except Exception as e:
+        print(f"❌ Error in intent classification: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        # Default to general conversation on error
+        return "general_conversation"
+
 
 @traceable(name="Learning Agent", tags=["agent", "career-guidance"])
 async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict:
@@ -135,8 +199,7 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
     Args:
         db: Database connection
         user_id: User identifier
-        user_message: Optional message from user. If "Updated the goals. Share the revised tasks.",
-                     triggers task assignment mode. Otherwise, conversational mode.
+        user_message: Optional message from user
     """
     try:
         print(f"\n{'='*60}")
@@ -164,6 +227,12 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
         )
 
         print("✅ LLM initialized")
+
+        # Classify user intent using LLM
+        user_intent = await classify_user_intent(llm, user_message) if user_message else "general_conversation"
+        is_task_assignment_mode = (user_intent == "task_assignment")
+        
+        print(f"🎯 Mode: {'TASK ASSIGNMENT' if is_task_assignment_mode else 'GENERAL CONVERSATION'}\n")
 
         # Define tools
         @tool
@@ -205,264 +274,176 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
                 import traceback
 
                 traceback.print_exc()
-                return {"error": str(e)}
+                return {"goals": [], "message": f"Error: {str(e)}"}
 
         @tool
-        async def get_project_details(project_id: str) -> dict:
-            """Fetch project details including name, description, and status."""
+        async def get_available_tasks(user_id: str) -> dict:
+            """
+            Fetch all available tasks from projects assigned to the user.
+            Returns tasks with their IDs, titles, descriptions, and project info.
+            """
             try:
-                print(f"🔍 Fetching project: {project_id}")
-                project = await db.projects.find_one({"_id": ObjectId(project_id)})
-                if not project:
-                    return {"error": f"Project {project_id} not found"}
+                print(f"🔍 Fetching available tasks for user: {user_id}")
 
-                result = {
-                    "id": str(project["_id"]),
-                    "name": project.get("name"),
-                    "description": project.get("description", "No description"),
-                    "status": project.get("status"),
-                }
-                print(f"✅ Project found: {result['name']}")
-                return result
-            except Exception as e:
-                print(f"❌ Error: {str(e)}")
-                return {"error": str(e)}
-
-        @tool
-        async def get_project_tasks(user_id: str) -> list:
-            """Fetch up to 10 available tasks from all assigned projects in sequence order."""
-            try:
-                print(f"\n{'='*60}")
-                print(f"🔍 FETCHING TASKS FROM ASSIGNED PROJECTS FOR USER: {user_id}")
-                print(f"{'='*60}")
-                
-                # Get assigned projects in sequence order
-                assigned_projects_cursor = db.assignedprojects.find(
-                    {"userId": user_id}
-                ).sort("sequenceId", 1)
+                # Get assigned projects for this user
+                assigned_projects_cursor = db.assignedprojects.find({"userId": user_id})
                 assigned_projects = await assigned_projects_cursor.to_list(length=None)
 
                 if not assigned_projects:
-                    print("⚠️ No projects assigned to user")
-                    return []
+                    print("⚠️ No assigned projects found")
+                    return {"tasks": [], "message": "No projects assigned yet"}
 
-                print(f"\n📦 User has {len(assigned_projects)} assigned projects")
+                print(f"   Found {len(assigned_projects)} assigned project(s)")
 
-                # Get user's assignments to identify completed/assigned tasks
-                assignment = await db.assignments.find_one({"userId": user_id})
-                completed_task_ids = set()
-                assigned_task_ids = set()
+                all_tasks = []
 
-                if assignment and assignment.get("tasks"):
-                    for task_assignment in assignment["tasks"]:
-                        task_id = str(task_assignment.get("taskId", ""))
-                        assigned_task_ids.add(task_id)
-                        if task_assignment.get("isCompleted", False):
-                            completed_task_ids.add(task_id)
-
-                print(f"   User has {len(assigned_task_ids)} assigned tasks ({len(completed_task_ids)} completed)")
-
-                # Collect available tasks from all projects in sequence
-                all_available_tasks = []
-                
                 for ap in assigned_projects:
                     project_id = ap.get("projectId")
-                    
-                    # Get all tasks for this project
-                    tasks_cursor = db.tasks.find({"project_id": project_id})
-                    tasks = await tasks_cursor.to_list(length=None)
-                    
+
                     # Get project details
                     project = await db.projects.find_one({"_id": ObjectId(project_id)})
-                    project_name = project.get("name", "Unknown Project") if project else "Unknown Project"
-                    
-                    print(f"   Project: {project_name} (Seq: {ap.get('sequenceId')}) - {len(tasks)} tasks")
-                    
-                    # Filter available tasks
-                    for task in tasks:
-                        task_id = str(task["_id"])
-                        if task_id not in completed_task_ids and task_id not in assigned_task_ids:
-                            all_available_tasks.append({
-                                "id": task_id,
-                                "title": task.get("title", "Untitled Task"),
-                                "description": task.get("description", "No description"),
-                                "status": task.get("status"),
-                                "project_id": project_id,
-                                "project_name": project_name
-                            })
+                    project_name = project.get("name", "Unknown") if project else "Unknown"
 
-                # Limit to 10 tasks
-                result = all_available_tasks[:10]
-                
-                print(f"\n📋 AVAILABLE TASKS (UP TO 10):")
-                print(f"{'-'*60}")
-                for i, task in enumerate(result, 1):
-                    print(f"{i}. {task['title']}")
-                    print(f"   ID: {task['id']}")
-                    print(f"   Project: {task['project_name']}")
-                    print(f"   Description: {task['description'][:80]}...")
-                    print()
-                
-                print(f"{'-'*60}")
-                print(f"✅ Returning {len(result)} tasks (from {len(all_available_tasks)} total available)")
-                print(f"{'='*60}\n")
-                
-                return result
+                    # Get tasks for this project
+                    tasks_cursor = db.tasks.find({"project_id": project_id})
+                    tasks = await tasks_cursor.to_list(length=None)
+
+                    print(f"   Project '{project_name}': {len(tasks)} task(s)")
+
+                    for task in tasks:
+                        task_info = {
+                            "id": str(task["_id"]),
+                            "title": task.get("name", "Untitled"),
+                            "description": task.get("description", "No description"),
+                            "project_id": project_id,
+                            "project_name": project_name,
+                        }
+                        all_tasks.append(task_info)
+
+                print(f"✅ Total available tasks: {len(all_tasks)}\n")
+                return {"tasks": all_tasks}
+
             except Exception as e:
-                print(f"❌ Error: {str(e)}")
+                print(f"❌ Error in get_available_tasks: {str(e)}")
                 import traceback
+
                 traceback.print_exc()
-                return [{"error": str(e)}]
+                return {"tasks": [], "message": f"Error: {str(e)}"}
 
         @tool
         async def get_user_assigned_tasks(user_id: str) -> dict:
-            """Fetch all tasks already assigned to the user (both completed and pending)."""
+            """
+            Fetch tasks already assigned to the user.
+            Used to avoid recommending duplicate tasks.
+            """
             try:
-                print(f"\n{'='*60}")
-                print(f"🔍 FETCHING ASSIGNED TASKS FOR USER: {user_id}")
-                print(f"{'='*60}")
-                
+                print(f"🔍 Fetching assigned tasks for user: {user_id}")
+
                 assignment = await db.assignments.find_one({"userId": user_id})
 
                 if not assignment or not assignment.get("tasks"):
-                    print("✅ No tasks assigned to user yet")
-                    print(f"{'='*60}\n")
-                    return {"assigned_task_ids": [], "completed_task_ids": []}
+                    print("   No tasks assigned yet")
+                    return {"assigned_task_ids": []}
 
-                assigned_task_ids = []
-                completed_task_ids = []
+                assigned_ids = [
+                    str(task.get("taskId"))
+                    for task in assignment.get("tasks", [])
+                    if task.get("taskId")
+                ]
 
-                print(f"\n📋 TASK DETAILS:")
-                print(f"{'-'*60}")
-                
-                for idx, task in enumerate(assignment.get("tasks", []), 1):
-                    task_id = task.get("taskId")
-                    task_name = task.get("taskName", "Unknown")
-                    is_completed = task.get("isCompleted", False)
-                    
-                    if task_id:
-                        assigned_task_ids.append(task_id)
-                        status_emoji = "✅" if is_completed else "⏳"
-                        status_text = "COMPLETED" if is_completed else "PENDING"
-                        
-                        print(f"{status_emoji} Task {idx}: [{status_text}]")
-                        print(f"   ID: {task_id}")
-                        print(f"   Name: {task_name}")
-                        print()
-                        
-                        if is_completed:
-                            completed_task_ids.append(task_id)
+                print(f"✅ User has {len(assigned_ids)} assigned task(s)\n")
+                return {"assigned_task_ids": assigned_ids}
 
-                print(f"{'-'*60}")
-                print(f"📊 SUMMARY:")
-                print(f"   Total assigned: {len(assigned_task_ids)}")
-                print(f"   Completed: {len(completed_task_ids)}")
-                print(f"   Pending: {len(assigned_task_ids) - len(completed_task_ids)}")
-                print(f"\n🚫 FILTER OUT THESE TASK IDs:")
-                for task_id in assigned_task_ids:
-                    print(f"   - {task_id}")
-                print(f"{'='*60}\n")
-                
-                return {
-                    "assigned_task_ids": assigned_task_ids,
-                    "completed_task_ids": completed_task_ids,
-                }
             except Exception as e:
-                print(f"❌ Error: {str(e)}")
+                print(f"❌ Error in get_user_assigned_tasks: {str(e)}")
                 import traceback
+
                 traceback.print_exc()
-                return {"error": str(e)}
+                return {"assigned_task_ids": []}
 
-        # Determine mode based on message
-        is_task_assignment_mode = (
-            user_message and "Updated the goals. Share the revised tasks." in user_message
-        )
-
+        # Choose tools based on mode
         if is_task_assignment_mode:
-            print("🎯 MODE: Task Assignment")
-            tools = [get_user_goals, get_user_assigned_tasks, get_project_tasks]
+            tools = [get_user_goals, get_available_tasks, get_user_assigned_tasks]
+        else:
+            tools = [get_user_goals]
 
-            system_prompt = f"""You are {agent_name}, an intelligent learning advisor.
+        # Build system prompt based on mode
+        if is_task_assignment_mode:
+            system_prompt = f"""You are {agent_name}, an AI learning assistant helping users grow their tech careers.
 
-            CRITICAL OBJECTIVE: Recommend EXACTLY 6 new learning tasks based on user's goals.
+Your user has updated their learning goals. Your task is to recommend personalized tasks from their assigned projects.
 
-            STRICT WORKFLOW - FOLLOW EVERY STEP:
-            1. Call get_user_goals to understand what user wants to learn
-            2. Call get_user_assigned_tasks to get list of task IDs to AVOID
-            3. Call get_project_tasks to get available tasks from assigned projects
-            4. EXCLUDE any task IDs in assigned_task_ids (from step 2)
-            5. From REMAINING tasks, select exactly 6 that match user's goals
-            6. Return ONLY those 6 tasks in JSON format
+PROCESS:
+1. Use get_user_goals to understand their current goals
+2. Use get_available_tasks to see all tasks from their assigned projects
+3. Use get_user_assigned_tasks to avoid recommending duplicates
+4. Select 3-5 most relevant tasks that align with their goals
+5. Return ONLY a JSON array (no other text)
 
-            ABSOLUTE RULES - NEVER VIOLATE:
-            ❌ DO NOT create fictional tasks
-            ❌ DO NOT modify task titles or IDs
-            ❌ DO NOT suggest tasks already in assigned_task_ids
-            ✅ ONLY use task IDs and titles EXACTLY as returned by get_project_tasks
-            ✅ Select from UNASSIGNED tasks only
-            ✅ Return exactly 6 tasks
+JSON FORMAT (return exactly this structure):
+[
+  {{"id": "task_id_1", "title": "Task name 1"}},
+  {{"id": "task_id_2", "title": "Task name 2"}},
+  {{"id": "task_id_3", "title": "Task name 3"}}
+]
 
-            OUTPUT FORMAT - RESPOND WITH ONLY THIS JSON:
-            [
-            {{"id": "actual_task_id_from_project", "title": "Actual Task Title from project"}},
-            {{"id": "actual_task_id_from_project", "title": "Actual Task Title from project"}},
-            {{"id": "actual_task_id_from_project", "title": "Actual Task Title from project"}},
-            {{"id": "actual_task_id_from_project", "title": "Actual Task Title from project"}},
-            {{"id": "actual_task_id_from_project", "title": "Actual Task Title from project"}},
-            {{"id": "actual_task_id_from_project", "title": "Actual Task Title from project"}}
-            ]
-            
-            NO markdown, NO explanation, NO other text - ONLY the JSON array."""
+SELECTION CRITERIA:
+- Match tasks to user's learning goals
+- Choose foundational tasks for beginners
+- Progress from basic to advanced
+- Ensure variety across different skills
+- NEVER recommend already assigned tasks
+- ONLY use task IDs from get_available_tasks (never invent IDs)
+
+CRITICAL:
+- Return ONLY the JSON array, no explanations
+- Use exact task IDs from database
+- Verify tasks are not in assigned_task_ids list"""
 
             user_prompt = f"""User ID: {user_id}
 
-            Execute the steps:
-            1. Get user goals
-            2. Get assigned tasks
-            3. Get all available project tasks
-            4. Filter out assigned tasks
-            5. Select 6 best unassigned tasks for user's goals
-            6. Return ONLY JSON array with those 6 tasks
+The user has updated their goals and wants task recommendations.
 
-            Remember: Use ONLY tasks from get_project_tasks response. Do NOT invent tasks."""
+Step 1: Get their learning goals
+Step 2: Get available tasks from assigned projects
+Step 3: Get already assigned tasks to avoid duplicates
+Step 4: Select 3-5 best tasks matching their goals
+Step 5: Return ONLY the JSON array"""
 
         else:
-            print("💬 MODE: Conversational Career Guidance")
-            tools = [get_user_goals]
+            system_prompt = f"""You are {agent_name}, a friendly AI learning assistant specializing in tech career growth.
 
-            system_prompt = f"""You are {agent_name}, a friendly and knowledgeable career advisor specializing in AI/ML, Data Science, and tech careers.
+YOUR EXPERTISE:
+- Career roadmaps (AI/ML, Data Science, Software Engineering)
+- Learning paths and skill development
+- Industry trends and job market insights
+- Project recommendations
+- Resume and interview guidance
+- Career transitions and upskilling
 
-            YOUR EXPERTISE:
-            - Career roadmaps (AI/ML, Data Science, Software Engineering)
-            - Learning paths and skill development
-            - Industry trends and job market insights
-            - Project recommendations
-            - Resume and interview guidance
-            - Career transitions and upskilling
+CONVERSATION STYLE:
+- Warm, encouraging, and professional
+- Provide specific, actionable advice
+- Use examples and real-world insights
+- Be honest about timelines and effort required
 
-            CONVERSATION STYLE:
-            - Warm, encouraging, and professional
-            - Provide specific, actionable advice
-            - Use examples and real-world insights
-            - Be honest about timelines and effort required
+BOUNDARIES:
+You can answer questions about:
+✅ Career paths in tech (AI/ML, Data Science, Software Engineering)
+✅ Learning roadmaps and skill development
+✅ Project ideas and portfolio building
+✅ Industry trends and job opportunities
+✅ Interview preparation and resume tips
+✅ Course and certification recommendations
 
-            BOUNDARIES:
-            You can answer questions about:
-            ✅ Career paths in tech (AI/ML, Data Science, Software Engineering)
-            ✅ Learning roadmaps and skill development
-            ✅ Project ideas and portfolio building
-            ✅ Industry trends and job opportunities
-            ✅ Interview preparation and resume tips
-            ✅ Course and certification recommendations
+For questions OUTSIDE these topics (personal problems, non-tech careers, medical/legal advice, etc.):
+❌ Politely decline and say: "I'm {agent_name}, focused on tech career growth. For other matters, please contact Vijender P at support@alumnx.com"
 
-            For questions OUTSIDE these topics (personal problems, non-tech careers, medical/legal advice, etc.):
-            ❌ Politely decline and say: "I'm {agent_name}, focused on tech career growth. For other matters, please contact Vijender P at support@alumnx.com"
-
-            IMPORTANT:
-            - Use get_user_goals tool to understand user's current goals
-            - Reference their goals in your advice when relevant
-            - Keep responses concise (2-3 paragraphs max)
-            - End with a follow-up question to continue the conversation"""
+IMPORTANT:
+- Use get_user_goals tool to understand user's current goals
+- Reference their goals in your advice when relevant
+- Keep responses concise (2-3 paragraphs max)
+- End with a follow-up question to continue the conversation"""
 
             if user_message:
                 user_prompt = f"""User message: {user_message}
