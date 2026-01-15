@@ -233,6 +233,33 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
         is_task_assignment_mode = (user_intent == "task_assignment")
         
         print(f"🎯 Mode: {'TASK ASSIGNMENT' if is_task_assignment_mode else 'GENERAL CONVERSATION'}\n")
+        
+        # Early validation for task assignment mode
+        if is_task_assignment_mode:
+            print("🔍 Validating prerequisites for task assignment...")
+            
+            # Check if user has goals set
+            goals_doc = await db.goals.find_one({"userId": user_id})
+            if not goals_doc or not goals_doc.get("goals"):
+                print("⚠️ No goals found for user")
+                return {
+                    "message": "Looks like your Goals have not been updated as yet. Please update them in Project School in the top right corner. Refer to https://alumnx.com/project-school",
+                    "status": "no_goals",
+                    "tasks": []
+                }
+            
+            # Check if user has assigned projects
+            assigned_projects_cursor = db.assignedprojects.find({"userId": user_id})
+            assigned_projects = await assigned_projects_cursor.to_list(length=None)
+            if not assigned_projects:
+                print("⚠️ No assigned projects found for user")
+                return {
+                    "message": "Looks like your Study Plan has not been prepared as yet. Please connect with Vijender asap.",
+                    "status": "no_projects",
+                    "tasks": []
+                }
+            
+            print("✅ Prerequisites validated - user has goals and assigned projects\n")
 
         # Define tools
         @tool
@@ -594,8 +621,14 @@ The user has just updated their goals. Fetch their goals and provide an encourag
 
             print(f"\n📤 Returning {len(enriched_tasks)} validated tasks\n")
             
+            # Return appropriate message based on whether tasks were found
+            if len(enriched_tasks) == 0:
+                message_text = "Looks like your Study Plan has not been prepared as yet. Please connect with Vijender asap."
+            else:
+                message_text = f"I've selected {len(enriched_tasks)} personalized tasks for your learning path. Here they are:"
+            
             response_obj = {
-                "response_text": f"I've selected {len(enriched_tasks)} personalized tasks for your learning path. Here they are:",
+                "message": message_text,
                 "status": "success",
                 "tasks": enriched_tasks,
                 "messages": result["messages"],
@@ -604,7 +637,7 @@ The user has just updated their goals. Fetch their goals and provide an encourag
             return response_obj
         else:
             return {
-                "response_text": final_response,
+                "message": final_response,
                 "status": "success",
                 "messages": result["messages"],
             }
@@ -616,6 +649,6 @@ The user has just updated their goals. Fetch their goals and provide an encourag
 
         traceback.print_exc()
         return {
-            "response_text": f"An error occurred: {str(e)}",
+            "message": f"An error occurred: {str(e)}",
             "status": "error"
         }
