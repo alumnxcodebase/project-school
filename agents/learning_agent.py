@@ -329,7 +329,7 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
                     for task in tasks:
                         task_info = {
                             "id": str(task["_id"]),
-                            "title": task.get("name", "Untitled"),
+                            "title": task.get("title", "Untitled"),
                             "description": task.get("description", "No description"),
                             "project_id": project_id,
                             "project_name": project_name,
