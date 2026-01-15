@@ -20,7 +20,6 @@ class Comment(BaseModel):
 
 class Task(BaseModel):
     model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
-    
     project_id: str
     title: str
     description: Optional[str] = None
