@@ -34,55 +34,6 @@ def serialize(doc):
     return doc
 
 
-def parse_agent_response_to_tasks(response_text: str) -> List[Dict[str, Any]]:
-    """
-    Parse the agent's response text to extract tasks.
-    Expected format: numbered list like "1. Task description 2. Another task..."
-    Returns a list of task objects with taskId and name.
-    """
-    tasks = []
-    
-    # Split by newlines first to handle multi-line format
-    lines = response_text.strip().split('\n')
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-            
-        # Try to match numbered format: "1. Task name" or "1) Task name"
-        import re
-        match = re.match(r'^(\d+)[.\)]\s*(.+)$', line)
-        
-        if match:
-            task_number = match.group(1)
-            task_description = match.group(2).strip()
-            
-            # Generate a taskId (you might want to use actual task IDs from your database)
-            # For now, using a simple format: "suggested_task_{number}"
-            task_id = f"suggested_task_{task_number}"
-            
-            tasks.append({
-                "taskId": task_id,
-                "name": task_description,
-                "isSuggested": True  # Flag to indicate this is an AI-suggested task
-            })
-    
-    # Fallback: if no numbered items found, try splitting by common delimiters
-    if not tasks:
-        # Try splitting by numbers followed by period/parenthesis
-        parts = re.split(r'\d+[.\)]\s*', response_text)
-        for i, part in enumerate(parts[1:], 1):  # Skip first empty part
-            if part.strip():
-                tasks.append({
-                    "taskId": f"suggested_task_{i}",
-                    "name": part.strip(),
-                    "isSuggested": True
-                })
-    
-    return tasks
-
-
 @router.post("/agent", status_code=200)
 async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...)):
     """
@@ -112,14 +63,9 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
             agent_response = result.get("response_text", "I couldn't process your request.")
             status = result.get("status", "error")
             
-            # Parse the response to extract tasks only if it looks like a task list
-            print("🔍 Parsing response for tasks...")
-            if _is_task_list_response(agent_response):
-                tasks = parse_agent_response_to_tasks(agent_response)
-                print(f"✅ Extracted {len(tasks)} tasks from response")
-            else:
-                tasks = []
-                print("ℹ️ Response is conversational (no tasks to extract)")
+            # Get tasks directly from result if they exist
+            tasks = result.get("tasks", [])
+            print(f"✅ Retrieved {len(tasks)} tasks from agent result")
         
         print(f"✅ Agent completed with status: {status}")
     except Exception as e:
@@ -151,13 +97,6 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
     }
 
 
-def _is_task_list_response(text: str) -> bool:
-    """Check if response looks like a task list (has numbered items)"""
-    lines = text.strip().split('\n')
-    numbered_lines = [l for l in lines if l.strip() and l.strip()[0].isdigit()]
-    return len(numbered_lines) >= 3  # At least 3 numbered items
-
-
 @router.get("/history/{user_id}")
 async def get_chat_history(request: Request, user_id: str):
     """Retrieve chat history for a specific user"""
@@ -176,11 +115,11 @@ async def manage_agent(request: Request, agent_req: ManageAgentRequest = Body(..
     agent_name = agent_req.agentName
 
     print("=" * 80)
-    print(f"📝 MANAGE AGENT REQUEST")
-    print(f"📝 Received userId: {user_id}")
-    print(f"📝 userId type: {type(user_id)}")
-    print(f"📝 userId length: {len(user_id)}")
-    print(f"📝 Agent name: {agent_name}")
+    print(f"🔍 MANAGE AGENT REQUEST")
+    print(f"🔍 Received userId: {user_id}")
+    print(f"🔍 userId type: {type(user_id)}")
+    print(f"🔍 userId length: {len(user_id)}")
+    print(f"🔍 Agent name: {agent_name}")
     print("=" * 80)
 
     # Validate agent name
