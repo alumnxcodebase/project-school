@@ -105,6 +105,35 @@ async def get_chat_history(request: Request, user_id: str):
     return [serialize(doc) async for doc in cursor]
 
 
+@router.delete("/clear-history/{user_id}", status_code=200)
+async def clear_chat_history(request: Request, user_id: str):
+    """
+    Clear all chat history for a specific user.
+    """
+    db = request.app.state.db
+
+    print(f"🗑️ Clearing chat history for user: {user_id}")
+
+    try:
+        # Delete all chat documents for this user
+        result = await db.chats.delete_many({"userId": user_id})
+        
+        deleted_count = result.deleted_count
+        print(f"✅ Deleted {deleted_count} chat messages")
+        
+        return {
+            "status": "success",
+            "message": f"Successfully cleared {deleted_count} chat messages",
+            "deletedCount": deleted_count
+        }
+    
+    except Exception as e:
+        print(f"❌ Error clearing chat history: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to clear chat history: {str(e)}")
+    
+
 @router.post("/manage-agent", status_code=200)
 async def manage_agent(request: Request, agent_req: ManageAgentRequest = Body(...)):
     """

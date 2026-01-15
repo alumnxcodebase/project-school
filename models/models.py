@@ -12,7 +12,7 @@ class Project(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
 
 class Comment(BaseModel):
-    """Model for task comments"""
+    """Model for task and resource comments"""
     model_config = ConfigDict(populate_by_name=True)
     comment: str
     commentBy: Literal["user", "admin"]
@@ -85,5 +85,67 @@ class TaskUpdate(BaseModel):
 class UserTaskLink(BaseModel):
     userId: str
     taskId: str
+    assignedBy: Literal["user", "admin"] = "admin"
+    sequenceId: Optional[int] = None
+
+# ============================================
+# Resource Models
+# ============================================
+
+class Resource(BaseModel):
+    """Model for learning resources (videos, docs, tutorials)"""
+    model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
+    id: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    link: str
+    category: str = "General"
+    tags: List[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=datetime.now)
+
+class ResourceAssignment(BaseModel):
+    """Individual resource assignment details"""
+    model_config = ConfigDict(populate_by_name=True)
+    resourceId: str
+    assignedBy: Literal["user", "admin"] = "admin"
+    sequenceId: Optional[int] = None
+    isCompleted: bool = False
+    comments: List[Comment] = Field(default_factory=list)
+
+class ResourceAssignmentCollection(BaseModel):
+    """User resource assignments collection - stores all resources assigned to a user"""
+    model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
+    id: Optional[str] = None
+    userId: str
+    resources: List[ResourceAssignment] = Field(default_factory=list)
+
+class ResourceResponse(BaseModel):
+    """Response model for user resources with full details"""
+    model_config = ConfigDict(populate_by_name=True)
+    resourceId: str
+    name: str
+    description: Optional[str] = None
+    link: str
+    category: str
+    tags: List[str] = Field(default_factory=list)
+    assignedBy: Literal["user", "admin"]
+    sequenceId: Optional[int] = None
+    isCompleted: bool
+    comments: List[Comment] = Field(default_factory=list)
+
+class ResourceUpdate(BaseModel):
+    """Model for updating resource fields"""
+    model_config = ConfigDict(populate_by_name=True)
+    name: Optional[str] = None
+    description: Optional[str] = None
+    link: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+class UserResourceLink(BaseModel):
+    """Model for linking a resource to a user"""
+    model_config = ConfigDict(populate_by_name=True)
+    userId: str
+    resourceId: str
     assignedBy: Literal["user", "admin"] = "admin"
     sequenceId: Optional[int] = None
