@@ -137,7 +137,7 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
             await db.chats.insert_one(user_chat_doc)
             print(f"✅ User message saved")
         
-        # STEP 3: User exists - get last 20 chat messages (now includes the user's message we just saved)
+        # STEP 3: User exists - get last 20 chat messages
         print("📚 Existing user - fetching chat history")
         chat_history_cursor = db.chats.find(
             {"userId": user_id}
@@ -172,7 +172,14 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
             print(f"✅ Saved agent name: {agent_name}")
             
             # Create greeting response
-            greeting = f"Hola! {agent_name} at your service"
+            greeting = f"Hola! {agent_name} at your service.\n\nI can help you with\n> Upskilling\n> Getting a job\n> Achieving your Goals"
+            
+            # Define buttons in WhatsApp format
+            buttons = [
+                {"name": "Upskilling", "callback": "upskilling"},
+                {"name": "Getting a job", "callback": "getting_job"},
+                {"name": "Achieving your Goals", "callback": "achieving_goals"}
+            ]
             
             # Save greeting to chat
             chat_doc = {
@@ -186,6 +193,7 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
             
             return {
                 "message": greeting,
+                "buttons": buttons,
                 "status": "success",
                 "skip_save": True
             }

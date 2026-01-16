@@ -1,3 +1,5 @@
+# chat.py
+
 from fastapi import APIRouter, Request, Body, HTTPException
 from datetime import datetime
 from models import Chat
@@ -39,7 +41,7 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
     """
     Invoke the learning agent for a user.
     Accepts optional message parameter for conversational queries or task updates.
-    Returns both a message and a structured tasks array for UI rendering.
+    Returns message, tasks array, and buttons array for UI rendering.
     """
     db = request.app.state.db
     user_id = agent_req.userId
@@ -50,31 +52,21 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
         print(f"💬 With message: {message}")
 
     try:
-        # Check if this is an agent name update message
-        if message and message.startswith("Updated the name of the agent to "):
-            print("🔄 Detected agent name update message")
-            agent_response = await handle_agent_name_update(db, user_id, message)
-            status = "success"
-            tasks = []  # No tasks for name update
-            skip_save = False
-        else:
-            # Regular learning agent invocation with optional message
-            print("⚙️ Running learning agent...")
-            result = await run_learning_agent(db, user_id, message)
-            
-            # FIXED: Changed from "response_text" to "message"
-            agent_response = result.get("message", "I couldn't process your request.")
-            status = result.get("status", "error")
-            
-            # Get tasks directly from result if they exist
-            tasks = result.get("tasks", [])
-            
-            # Check if we should skip saving (for initial save chat requests)
-            skip_save = result.get("skip_save", False)
-            
-            print(f"✅ Retrieved {len(tasks)} tasks from agent result")
+        # Regular learning agent invocation with optional message
+        print("⚙️ Running learning agent...")
+        result = await run_learning_agent(db, user_id, message)
         
+        agent_response = result.get("message", "I couldn't process your request.")
+        status = result.get("status", "error")
+        
+        # Get tasks, buttons, and skip_save flag from result
+        tasks = result.get("tasks", [])
+        buttons = result.get("buttons", [])
+        skip_save = result.get("skip_save", False)
+        
+        print(f"✅ Retrieved {len(tasks)} tasks and {len(buttons)} buttons from agent result")
         print(f"✅ Agent completed with status: {status}")
+        
     except Exception as e:
         print(f"❌ Agent Error: {str(e)}")
         import traceback
@@ -82,6 +74,7 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
         agent_response = f"An error occurred: {str(e)}"
         status = "error"
         tasks = []
+        buttons = []
         skip_save = False
 
     # Store agent chat in database ONLY if skip_save is False
@@ -98,10 +91,11 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
 
         created_chat = await db.chats.find_one({"_id": result.inserted_id})
         
-        # Return structured response with both message and tasks
+        # Return structured response with message, tasks, and buttons
         return {
             **serialize(created_chat),
-            "tasks": tasks,  # Add tasks array to response
+            "tasks": tasks,
+            "buttons": buttons,
             "status": status
         }
     else:
@@ -113,6 +107,7 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
             "message": agent_response,
             "timestamp": datetime.now().isoformat(),
             "tasks": tasks,
+            "buttons": buttons,
             "status": status
         }
 
@@ -165,10 +160,10 @@ async def manage_agent(request: Request, agent_req: ManageAgentRequest = Body(..
 
     print("=" * 80)
     print(f"📝 MANAGE AGENT REQUEST")
-    print(f"🔍 Received userId: {user_id}")
-    print(f"🔍 userId type: {type(user_id)}")
-    print(f"🔍 userId length: {len(user_id)}")
-    print(f"🔍 Agent name: {agent_name}")
+    print(f"📝 Received userId: {user_id}")
+    print(f"📝 userId type: {type(user_id)}")
+    print(f"📝 userId length: {len(user_id)}")
+    print(f"📝 Agent name: {agent_name}")
     print("=" * 80)
 
     # Validate agent name
