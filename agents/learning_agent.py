@@ -171,8 +171,8 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
             )
             print(f"✅ Saved agent name: {agent_name}")
             
-            # Create greeting response
-            greeting = f"Hola! {agent_name} at your service.\n\nI can help you with\n> Upskilling\n> Getting a job\n> Achieving your Goals"
+            # Create greeting response WITHOUT button text (buttons will be rendered separately)
+            greeting = f"Hola! {agent_name} at your service."
             
             # Define buttons in WhatsApp format
             buttons = [
