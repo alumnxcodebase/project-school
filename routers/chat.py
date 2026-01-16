@@ -56,6 +56,7 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
             agent_response = await handle_agent_name_update(db, user_id, message)
             status = "success"
             tasks = []  # No tasks for name update
+            skip_save = False
         else:
             # Regular learning agent invocation with optional message
             print("⚙️ Running learning agent...")
@@ -67,6 +68,10 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
             
             # Get tasks directly from result if they exist
             tasks = result.get("tasks", [])
+            
+            # Check if we should skip saving (for initial save chat requests)
+            skip_save = result.get("skip_save", False)
+            
             print(f"✅ Retrieved {len(tasks)} tasks from agent result")
         
         print(f"✅ Agent completed with status: {status}")
@@ -77,26 +82,39 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
         agent_response = f"An error occurred: {str(e)}"
         status = "error"
         tasks = []
+        skip_save = False
 
-    # Store agent chat in database
-    agent_chat_doc = {
-        "userId": user_id,
-        "userType": "agent",
-        "message": agent_response,
-        "timestamp": datetime.now()
-    }
+    # Store agent chat in database ONLY if skip_save is False
+    if not skip_save:
+        agent_chat_doc = {
+            "userId": user_id,
+            "userType": "agent",
+            "message": agent_response,
+            "timestamp": datetime.now()
+        }
 
-    result = await db.chats.insert_one(agent_chat_doc)
-    print(f"💾 Stored agent response in chat history")
+        result = await db.chats.insert_one(agent_chat_doc)
+        print(f"💾 Stored agent response in chat history")
 
-    created_chat = await db.chats.find_one({"_id": result.inserted_id})
-    
-    # Return structured response with both message and tasks
-    return {
-        **serialize(created_chat),
-        "tasks": tasks,  # Add tasks array to response
-        "status": status
-    }
+        created_chat = await db.chats.find_one({"_id": result.inserted_id})
+        
+        # Return structured response with both message and tasks
+        return {
+            **serialize(created_chat),
+            "tasks": tasks,  # Add tasks array to response
+            "status": status
+        }
+    else:
+        print(f"⏭️ Skipping chat save (already handled in agent)")
+        # Return response without saving again
+        return {
+            "userId": user_id,
+            "userType": "agent",
+            "message": agent_response,
+            "timestamp": datetime.now().isoformat(),
+            "tasks": tasks,
+            "status": status
+        }
 
 
 @router.get("/history/{user_id}")
@@ -146,7 +164,7 @@ async def manage_agent(request: Request, agent_req: ManageAgentRequest = Body(..
     agent_name = agent_req.agentName
 
     print("=" * 80)
-    print(f"🔍 MANAGE AGENT REQUEST")
+    print(f"📝 MANAGE AGENT REQUEST")
     print(f"🔍 Received userId: {user_id}")
     print(f"🔍 userId type: {type(user_id)}")
     print(f"🔍 userId length: {len(user_id)}")

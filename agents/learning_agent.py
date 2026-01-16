@@ -77,27 +77,40 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
         # Handle save chat request for new users
         if user_message and user_message.startswith("Save chat for the new user with the phone number:"):
             print("💾 Handling save chat request for new user")
-            
-            # Extract phone number from message
-            phone_number = user_message.replace("Save chat for the new user with the phone number:", "").strip()
-            
-            # Save the initial chat
-            from datetime import datetime
-            chat_doc = {
-                "userId": phone_number,
-                "userType": "user",
-                "message": "Initial conversation started",
-                "timestamp": datetime.now()
-            }
-            
-            await db.chats.insert_one(chat_doc)
-            print(f"✅ Initial chat saved for new user: {phone_number}")
-            
+        
+        # Extract phone number from message
+        phone_number = user_message.replace("Save chat for the new user with the phone number:", "").strip()
+        
+        # Check if chat already exists for this user
+        existing_chat = await db.chats.find_one({"userId": phone_number})
+        
+        if existing_chat:
+            print(f"⚠️ Chat history already exists for user: {phone_number}")
             return {
-                "message": f"Chat history initialized for new user {phone_number}",
+                "message": f"Chat history already exists for user {phone_number}",
                 "status": "success",
-                "tasks": []
+                "tasks": [],
+                "skip_save": True  # Flag to skip saving in chat.py
             }
+        
+        # Save the initial chat
+        from datetime import datetime
+        chat_doc = {
+            "userId": phone_number,
+            "userType": "agent",
+            "message": f"Initial conversation started. Chat history initialized for new user {phone_number}",
+            "timestamp": datetime.now()
+        }
+        
+        result = await db.chats.insert_one(chat_doc)
+        print(f"✅ Initial chat saved for new user: {phone_number} with ID: {result.inserted_id}")
+        
+        return {
+            "message": f"Initial conversation started. Chat history initialized for new user {phone_number}",
+            "status": "success",
+            "tasks": [],
+            "skip_save": True  # Flag to skip saving in chat.py
+        }
 
         # Classify user intent
         is_task_assignment_mode = False
