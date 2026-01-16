@@ -1,0 +1,9 @@
+User ID: {user_id}
+
+The user has updated their learning goals. Use the available tools to:
+1. Fetch their current goals
+2. Get their assigned projects
+3. Get tasks for each project
+4. Recommend 3-5 tasks that best match their goals
+
+Return ONLY a JSON array of recommended tasks.

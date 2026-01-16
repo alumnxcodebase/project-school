@@ -1,0 +1,5 @@
+User message: {user_message}
+
+User ID: {user_id}
+
+Please respond to the user's question. First, fetch their learning goals to provide personalized advice.

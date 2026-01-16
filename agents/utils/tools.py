@@ -1,0 +1,129 @@
+from langchain_core.tools import tool
+from bson import ObjectId
+import httpx
+from datetime import datetime
+
+
+def create_agent_tools(db):
+    """Create and return all agent tools"""
+    
+    @tool
+    async def get_user_goals(user_id: str) -> str:
+        """Fetch the user's current learning goals from the database."""
+        try:
+            print(f"\n🔍 Fetching goals for user: {user_id}")
+            user_doc = await db.users.find_one({"userId": user_id})
+            
+            if user_doc and "goals" in user_doc:
+                goals = user_doc["goals"]
+                print(f"✅ Found goals: {goals}")
+                return f"User's learning goals: {goals}"
+            else:
+                print("⚠️ No goals found for user")
+                return "No learning goals set yet. User should update their goals first."
+        except Exception as e:
+            print(f"❌ Error fetching goals: {str(e)}")
+            return f"Error fetching goals: {str(e)}"
+
+    @tool
+    async def get_assigned_projects(user_id: str) -> str:
+        """Get list of projects assigned to the user with project IDs and names."""
+        try:
+            print(f"\n📚 Fetching assigned projects for user: {user_id}")
+            
+            assigned_projects_cursor = db.assignedprojects.find({"userId": user_id})
+            assigned_projects = await assigned_projects_cursor.to_list(length=None)
+            
+            if not assigned_projects:
+                print("⚠️ No projects assigned to user")
+                return "No projects assigned to this user yet."
+            
+            project_list = []
+            for ap in assigned_projects:
+                project_id = ap.get("projectId")
+                project = await db.projects.find_one({"_id": ObjectId(project_id)})
+                
+                if project:
+                    project_name = project.get("name", "Unknown Project")
+                    project_list.append(f"Project ID: {project_id}, Name: {project_name}")
+                    print(f"   ✓ {project_name} (ID: {project_id})")
+            
+            print(f"✅ Found {len(project_list)} assigned projects")
+            return "Assigned projects:\n" + "\n".join(project_list)
+            
+        except Exception as e:
+            print(f"❌ Error fetching assigned projects: {str(e)}")
+            return f"Error fetching assigned projects: {str(e)}"
+
+    @tool
+    async def get_tasks_for_project(project_id: str) -> str:
+        """Get all tasks for a specific project. Returns task IDs and names."""
+        try:
+            print(f"\n📋 Fetching tasks for project: {project_id}")
+            
+            tasks_cursor = db.tasks.find({"project_id": project_id})
+            tasks = await tasks_cursor.to_list(length=None)
+            
+            if not tasks:
+                print(f"⚠️ No tasks found for project {project_id}")
+                return f"No tasks found for project {project_id}"
+            
+            task_list = []
+            for task in tasks:
+                task_id = str(task["_id"])
+                task_name = task.get("name", "Unnamed Task")
+                task_desc = task.get("description", "No description")
+                
+                task_list.append(
+                    f"Task ID: {task_id}\n"
+                    f"Name: {task_name}\n"
+                    f"Description: {task_desc}\n"
+                )
+                print(f"   ✓ {task_name} (ID: {task_id})")
+            
+            print(f"✅ Found {len(task_list)} tasks")
+            return f"Tasks for project {project_id}:\n\n" + "\n".join(task_list)
+            
+        except Exception as e:
+            print(f"❌ Error fetching tasks: {str(e)}")
+            return f"Error fetching tasks for project {project_id}: {str(e)}"
+
+    @tool
+    async def save_chat_history(user_id: str, message: str, user_type: str = "user") -> str:
+        """
+        Save a chat message to the chat history database.
+        
+        Args:
+            user_id: The user ID (can be phone number for new users)
+            message: The message content to save
+            user_type: Type of user - "user" or "agent" (default: "user")
+        
+        Returns:
+            Success or error message
+        """
+        try:
+            print(f"\n💾 Saving chat to history...")
+            print(f"   User ID: {user_id}")
+            print(f"   User Type: {user_type}")
+            print(f"   Message: {message[:100]}...")  # Log first 100 chars
+            
+            # Insert chat document into database
+            chat_doc = {
+                "userId": user_id,
+                "userType": user_type,
+                "message": message,
+                "timestamp": datetime.now()
+            }
+            
+            result = await db.chats.insert_one(chat_doc)
+            
+            print(f"✅ Chat saved successfully with ID: {result.inserted_id}")
+            return f"Chat saved successfully for user {user_id}"
+            
+        except Exception as e:
+            print(f"❌ Error saving chat: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return f"Error saving chat: {str(e)}"
+
+    return [get_user_goals, get_assigned_projects, get_tasks_for_project, save_chat_history]

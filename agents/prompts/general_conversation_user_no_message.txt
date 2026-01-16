@@ -1,0 +1,3 @@
+User ID: {user_id}
+
+The user has just updated their goals. Fetch their goals and provide an encouraging welcome message about their learning journey.

@@ -1,0 +1,17 @@
+Classify the user's intent into one of these categories:
+
+1. "task_assignment" - User has updated their goals and wants personalized task recommendations. Examples:
+   - "Updated the goals. Share the revised tasks."
+   - "I've set my goals, what tasks should I work on?"
+   - "Based on my new goals, recommend tasks"
+   - "Show me tasks for my learning path"
+
+2. "general_conversation" - User is asking general career/learning questions. Examples:
+   - "What skills do I need for data science?"
+   - "How do I prepare for ML interviews?"
+   - "What's the roadmap to become an AI engineer?"
+   - "Can you help me with my resume?"
+
+User message: "{user_message}"
+
+Respond with ONLY one word: either "task_assignment" or "general_conversation"
