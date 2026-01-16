@@ -1,5 +1,11 @@
+# general_conversation_user_with_message.txt
+
 User message: {user_message}
 
 User ID: {user_id}
 
-Please respond to the user's question. First, fetch their learning goals to provide personalized advice.
+Please respond to the user's question. 
+
+If the user is asking about previous conversations, past interactions, or anything related to chat history, call the get_chat_history tool FIRST before responding.
+
+Otherwise, fetch their learning goals to provide personalized advice.

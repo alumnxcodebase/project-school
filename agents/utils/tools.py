@@ -1,3 +1,5 @@
+# tools.py
+
 from langchain_core.tools import tool
 from bson import ObjectId
 import httpx
@@ -11,7 +13,7 @@ def create_agent_tools(db):
     async def get_user_goals(user_id: str) -> str:
         """Fetch the user's current learning goals from the database."""
         try:
-            print(f"\n🔍 Fetching goals for user: {user_id}")
+            print(f"\n🎯 Fetching goals for user: {user_id}")
             user_doc = await db.users.find_one({"userId": user_id})
             
             if user_doc and "goals" in user_doc:
@@ -46,7 +48,7 @@ def create_agent_tools(db):
                 if project:
                     project_name = project.get("name", "Unknown Project")
                     project_list.append(f"Project ID: {project_id}, Name: {project_name}")
-                    print(f"   ✓ {project_name} (ID: {project_id})")
+                    print(f"   ✅ {project_name} (ID: {project_id})")
             
             print(f"✅ Found {len(project_list)} assigned projects")
             return "Assigned projects:\n" + "\n".join(project_list)
@@ -79,7 +81,7 @@ def create_agent_tools(db):
                     f"Name: {task_name}\n"
                     f"Description: {task_desc}\n"
                 )
-                print(f"   ✓ {task_name} (ID: {task_id})")
+                print(f"   ✅ {task_name} (ID: {task_id})")
             
             print(f"✅ Found {len(task_list)} tasks")
             return f"Tasks for project {project_id}:\n\n" + "\n".join(task_list)
@@ -87,6 +89,54 @@ def create_agent_tools(db):
         except Exception as e:
             print(f"❌ Error fetching tasks: {str(e)}")
             return f"Error fetching tasks for project {project_id}: {str(e)}"
+
+    @tool
+    async def get_chat_history(user_id: str, limit: int = 20) -> str:
+        """
+        Fetch recent chat history for the user to provide context for answering questions.
+        Use this tool when the user asks about previous conversations, names, or any past interactions.
+        
+        Args:
+            user_id: The user's ID
+            limit: Number of recent messages to fetch (default: 20)
+        
+        Returns:
+            Formatted chat history with timestamps
+        """
+        try:
+            print(f"\n💬 Fetching chat history for user: {user_id} (limit: {limit})")
+            
+            chat_history_cursor = db.chats.find(
+                {"userId": user_id}
+            ).sort("timestamp", -1).limit(limit)
+            
+            chat_history = await chat_history_cursor.to_list(length=limit)
+            chat_history.reverse()  # Reverse to get chronological order
+            
+            if not chat_history:
+                print("⚠️ No chat history found")
+                return "No previous chat history found for this user."
+            
+            # Format chat history
+            formatted_history = []
+            for chat in chat_history:
+                user_type = chat.get("userType", "unknown")
+                message = chat.get("message", "")
+                timestamp = chat.get("timestamp", "")
+                
+                formatted_history.append(f"{user_type.upper()}: {message}")
+            
+            history_text = "\n".join(formatted_history)
+            print(f"✅ Retrieved {len(chat_history)} chat messages")
+            print(f"📜 Chat history:\n{history_text}\n")
+            
+            return f"Chat history for user {user_id}:\n\n{history_text}"
+            
+        except Exception as e:
+            print(f"❌ Error fetching chat history: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return f"Error fetching chat history: {str(e)}"
 
     @tool
     async def save_chat_history(user_id: str, message: str, user_type: str = "user") -> str:
@@ -126,4 +176,4 @@ def create_agent_tools(db):
             traceback.print_exc()
             return f"Error saving chat: {str(e)}"
 
-    return [get_user_goals, get_assigned_projects, get_tasks_for_project, save_chat_history]
+    return [get_user_goals, get_assigned_projects, get_tasks_for_project, get_chat_history, save_chat_history]
