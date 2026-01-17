@@ -144,6 +144,91 @@ async def save_resume_data_directly(db, user_id: str, resume_data: dict) -> bool
         return False
 
 
+async def extract_and_save_user_info(db, llm, user_id: str, user_text: str) -> bool:
+    """
+    Extract structured information from user's text and save to userdata.
+    
+    Args:
+        db: Database connection
+        llm: LLM instance
+        user_id: User's ID
+        user_text: User's description about themselves
+        
+    Returns:
+        bool: True if extracted and saved successfully
+    """
+    try:
+        print(f"\n{'='*60}")
+        print(f"📝 EXTRACTING USER INFO FROM TEXT")
+        print(f"{'='*60}")
+        print(f"User ID: {user_id}")
+        print(f"Text length: {len(user_text)} chars")
+        
+        # Use LLM to extract structured data
+        extraction_prompt = f"""Extract structured information from the following user description.
+
+User's message: "{user_text}"
+
+Extract and return ONLY a JSON object with these fields (use "Not provided" if information is missing):
+- about: Brief summary of the person
+- interests: What excites them or what they're interested in
+- careerGoals: Their career aspirations and goals
+- currentRole: Their current job/role if mentioned
+- skills: Any skills they mentioned
+- experience: Years of experience or background mentioned
+
+Return ONLY the JSON object, nothing else."""
+
+        result = await llm.ainvoke([HumanMessage(content=extraction_prompt)])
+        response = parse_llm_content(result.content).strip()
+        
+        print(f"LLM response:\n{response}\n")
+        
+        # Extract JSON from response
+        import re
+        json_match = re.search(r'\{.*\}', response, re.DOTALL)
+        if json_match:
+            extracted_data = json.loads(json_match.group(0))
+            print(f"✅ Extracted data: {list(extracted_data.keys())}")
+            
+            # Save to userdata collection
+            userdata_doc = {
+                "userId": user_id,
+                "resumeData": extracted_data,
+                "uploadedAt": datetime.now(),
+                "lastUpdated": datetime.now(),
+                "dataSource": "text_input"
+            }
+            
+            result = await db.userdata.update_one(
+                {"userId": user_id},
+                {
+                    "$set": {
+                        "resumeData": extracted_data,
+                        "lastUpdated": datetime.now(),
+                        "dataSource": "text_input"
+                    },
+                    "$setOnInsert": {
+                        "uploadedAt": datetime.now()
+                    }
+                },
+                upsert=True
+            )
+            
+            print(f"✅ User info saved to userdata collection")
+            print(f"{'='*60}\n")
+            return True
+        else:
+            print(f"⚠️ Could not extract JSON from LLM response")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error extracting user info: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def extract_response_type_and_buttons(response_text: str) -> tuple:
     """
     Extract response type tag from agent's response and determine buttons.
@@ -351,15 +436,8 @@ async def run_learning_agent(
             )
             print(f"✅ Saved agent name: {agent_name}")
             
-            # Create greeting response WITHOUT button text
-            greeting = f"Hola! {agent_name} at your service."
-            
-            # Define buttons in WhatsApp format
-            buttons = [
-                {"name": "Upskilling", "callback": "upskilling"},
-                {"name": "Getting a job", "callback": "getting_job"},
-                {"name": "Achieving your Goals", "callback": "achieving_goals"}
-            ]
+            # Create greeting asking for user info or resume
+            greeting = f"{agent_name} at your service!\n\nPlease tell me something about yourself, what excites you, your career goals or just upload your resume here so that I can get to know you better."
             
             # Save greeting to chat
             chat_doc = {
@@ -373,7 +451,7 @@ async def run_learning_agent(
             
             return {
                 "message": greeting,
-                "buttons": buttons,
+                "buttons": [],  # No buttons at this stage
                 "status": "success",
                 "skip_save": True
             }
@@ -382,6 +460,28 @@ async def run_learning_agent(
         # STEP 5: Normal conversation flow - not a name
         # ============================================================
         print("💬 Regular conversation - proceeding with normal flow")
+        
+        # ============================================================
+        # STEP 5.5: Check if user is providing info about themselves
+        # ============================================================
+        # Check if user has already provided their info/resume
+        existing_userdata = await db.userdata.find_one({"userId": user_id})
+        
+        if not existing_userdata and user_message and not resume_data:
+            # User hasn't provided info yet, and they're sending text (not resume)
+            # Extract and save their information
+            print(f"📝 User providing information about themselves")
+            
+            extraction_success = await extract_and_save_user_info(
+                db, llm, user_id, user_message
+            )
+            
+            if extraction_success:
+                print(f"✅ User info extracted and saved")
+                # Set a flag so we know to proceed with goal alignment
+                user_message = f"User provided information about themselves: {user_message}"
+            else:
+                print(f"⚠️ Could not extract user info, proceeding normally")
         
         # Initialize prompt loader
         prompt_loader = PromptLoader(Config.PROMPTS_DIR)
@@ -413,16 +513,27 @@ async def run_learning_agent(
         else:
             system_prompt = prompt_loader.format("general_conversation_system", agent_name=agent_name)
             
-            # Add resume context if available
-            resume_context = ""
+            # Add user info context if available (from resume upload OR text input)
+            user_info_context = ""
+            
             if resume_data:
-                resume_context = f"\n\nNote: The user just uploaded their resume with the following information:\n{json.dumps(resume_data, indent=2)}\n\nPlease acknowledge the resume upload and provide relevant career guidance based on the information in the resume. Then evaluate if their background and goals align with Alumnx's focus (React, Data Science, AI/ML, Software Engineering)."
+                # Resume was just uploaded
+                user_info_context = f"\n\nNote: The user just uploaded their resume with the following information:\n{json.dumps(resume_data, indent=2)}\n\nPlease acknowledge the upload and provide relevant career guidance based on the information. Then evaluate if their background and goals align with Alumnx's focus (React, Data Science, AI/ML, Software Engineering)."
+            elif existing_userdata and existing_userdata.get("resumeData"):
+                # User previously provided info (text or resume)
+                stored_data = existing_userdata.get("resumeData")
+                data_source = existing_userdata.get("dataSource", "resume")
+                
+                if data_source == "text_input":
+                    user_info_context = f"\n\nNote: The user previously provided information about themselves:\n{json.dumps(stored_data, indent=2)}\n\nUse this information to provide personalized career guidance and evaluate if their goals align with Alumnx's focus (React, Data Science, AI/ML, Software Engineering)."
+                else:
+                    user_info_context = f"\n\nNote: The user's background information:\n{json.dumps(stored_data, indent=2)}\n\nUse this information to provide personalized career guidance and evaluate if their goals align with Alumnx's focus (React, Data Science, AI/ML, Software Engineering)."
             
             user_prompt = prompt_loader.format(
                 "general_conversation_user_with_message",
                 user_message=user_message,
                 user_id=user_id
-            ) + resume_context
+            ) + user_info_context
 
         print("🤖 Creating LangGraph ReAct agent...\n")
 
