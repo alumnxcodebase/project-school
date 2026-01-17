@@ -18,6 +18,15 @@ from models import (
     Comment
 )
 
+class BulkTaskAssignment(BaseModel):
+    taskId: str
+    sequenceId: int
+
+
+class BulkAssignTasksRequest(BaseModel):
+    userId: str
+    tasks: List[BulkTaskAssignment]
+
 router = APIRouter()
 
 
@@ -348,3 +357,69 @@ async def mark_task_active(request: Request, user_id: str, task_id: str):
         raise HTTPException(status_code=404, detail="Task assignment not found")
     
     return {"status": "success", "message": "Task marked as active"}
+
+@router.post("/bulk-assign-tasks-to-user", status_code=200)
+async def bulk_assign_tasks_to_user(request: Request, bulk_req: BulkAssignTasksRequest = Body(...)):
+    """
+    Bulk assign multiple tasks to a user with their sequence IDs.
+    Replaces all existing task assignments for the user.
+    
+    Request body:
+    {
+        "userId": "user123",
+        "tasks": [
+            {"taskId": "task1", "sequenceId": 1},
+            {"taskId": "task2", "sequenceId": 2},
+            {"taskId": "task3", "sequenceId": 3}
+        ]
+    }
+    """
+    db = request.app.state.db
+    user_id = bulk_req.userId
+    tasks = bulk_req.tasks
+
+    print(f"📦 Bulk assigning {len(tasks)} tasks to user: {user_id}")
+
+    # Verify all tasks exist
+    task_ids = [task.taskId for task in tasks]
+    existing_tasks = await db.tasks.find(
+        {"_id": {"$in": [ObjectId(tid) for tid in task_ids]}}
+    ).to_list(length=None)
+    
+    existing_task_ids = {str(task["_id"]) for task in existing_tasks}
+    invalid_tasks = set(task_ids) - existing_task_ids
+    
+    if invalid_tasks:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Tasks not found: {', '.join(invalid_tasks)}"
+        )
+
+    # Create task assignments
+    task_assignments = [
+        TaskAssignment(
+            taskId=task.taskId,
+            assignedBy="admin",
+            sequenceId=task.sequenceId,
+            taskStatus="pending",
+            expectedCompletionDate=None
+        ).model_dump()
+        for task in tasks
+    ]
+
+    # Upsert assignment document (replace all tasks)
+    result = await db.assignments.update_one(
+        {"userId": user_id},
+        {
+            "$set": {"tasks": task_assignments}
+        },
+        upsert=True
+    )
+
+    print(f"✅ Bulk assigned {len(tasks)} tasks to user {user_id}")
+    
+    return {
+        "status": "success",
+        "message": f"Successfully assigned {len(tasks)} tasks to user {user_id}",
+        "taskCount": len(tasks)
+    }
