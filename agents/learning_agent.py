@@ -437,7 +437,7 @@ async def run_learning_agent(
             print(f"✅ Saved agent name: {agent_name}")
             
             # Create greeting asking for user info or resume
-            greeting = f"{agent_name} at your service!\n\nPlease tell me something about yourself, what excites you, your career goals or just upload your resume here so that I can get to know you better."
+            greeting = f"{agent_name} at your service!\n\nPlease tell me something about yourself, what excites you, your career goals or just attach your Resume here and Submit, so that I can get to know you better."
             
             # Save greeting to chat
             chat_doc = {

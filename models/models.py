@@ -1,3 +1,4 @@
+# models.py
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Literal
 from datetime import datetime
@@ -8,6 +9,7 @@ class Project(BaseModel):
     id: Optional[str] = None
     name: str
     description: Optional[str] = None
+    projectType: Literal["project", "training"] = "project"
     status: str = "active"
     created_at: datetime = Field(default_factory=datetime.now)
 
@@ -23,7 +25,8 @@ class Task(BaseModel):
     project_id: str
     title: str
     description: Optional[str] = None
-    status: str = "pending"
+    estimatedTime: float
+    skillType: str
 
 class TaskAssignment(BaseModel):
     """Individual task assignment details"""
@@ -32,6 +35,8 @@ class TaskAssignment(BaseModel):
     assignedBy: Literal["user", "admin"] = "admin"
     sequenceId: Optional[int] = None
     isCompleted: bool = False
+    expectedCompletionDate: Optional[str] = None
+    completionDate: Optional[str] = None
     comments: List[Comment] = Field(default_factory=list)
 
 class Assignment(BaseModel):
@@ -47,11 +52,15 @@ class TaskResponse(BaseModel):
     taskId: str
     name: str
     description: Optional[str] = None
+    estimatedTime: float
+    skillType: str
     projectId: str
     projectName: str
     assignedBy: Literal["user", "admin"]
     sequenceId: Optional[int] = None
     isCompleted: bool
+    expectedCompletionDate: Optional[str] = None
+    completionDate: Optional[str] = None
     comments: List[Comment] = Field(default_factory=list)
 
 class ProjectWithTasks(BaseModel):
@@ -60,6 +69,7 @@ class ProjectWithTasks(BaseModel):
     id: Optional[str] = None
     name: str
     description: Optional[str] = None
+    projectType: Literal["project", "training"] = "project"
     status: str = "active"
     created_at: datetime
     tasks: List[Task] = Field(default_factory=list)
@@ -67,7 +77,8 @@ class ProjectWithTasks(BaseModel):
 class BulkTaskItem(BaseModel):
     title: str
     description: Optional[str] = None
-    status: str = "pending"
+    estimatedTime: float
+    skillType: str
 
 class BulkLoadTasksRequest(BaseModel):
     projectId: str
@@ -87,7 +98,8 @@ class Goal(BaseModel):
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
-    status: Optional[str] = None
+    estimatedTime: Optional[float] = None
+    skillType: Optional[str] = None
     priority: Optional[str] = None
 
 class UserTaskLink(BaseModel):
@@ -95,6 +107,7 @@ class UserTaskLink(BaseModel):
     taskId: str
     assignedBy: Literal["user", "admin"] = "admin"
     sequenceId: Optional[int] = None
+    expectedCompletionDate: Optional[str] = None
 
 # ============================================
 # Resource Models
@@ -157,3 +170,30 @@ class UserResourceLink(BaseModel):
     resourceId: str
     assignedBy: Literal["user", "admin"] = "admin"
     sequenceId: Optional[int] = None
+
+class TaskWithAssignment(BaseModel):
+    """Task model with assignment status"""
+    model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
+    id: Optional[str] = None
+    project_id: str
+    title: str
+    description: Optional[str] = None
+    estimatedTime: float
+    skillType: str
+    isAssigned: bool = False
+
+class GetProjectTasksRequest(BaseModel):
+    """Request model for getting project tasks with assignment status"""
+    projectId: str
+    userId: str
+
+class ProjectWithTasksAndAssignment(BaseModel):
+    """Response model for project details with tasks and their assignment status"""
+    model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
+    id: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    projectType: Literal["project", "training"] = "project"
+    status: str = "active"
+    created_at: datetime
+    tasks: List[TaskWithAssignment] = Field(default_factory=list)
