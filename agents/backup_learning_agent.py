@@ -6,7 +6,6 @@ from langgraph.prebuilt import create_react_agent
 from langsmith import traceable
 from datetime import datetime
 import json
-import re
 
 from .config.settings import Config
 from .prompts.loader import PromptLoader
@@ -66,6 +65,7 @@ Respond ONLY with the JSON object, nothing else."""
         response = parse_llm_content(result.content).strip()
         
         # Parse JSON response
+        import re
         
         # Extract JSON from response
         json_match = re.search(r'\{.*\}', response, re.DOTALL)
@@ -141,49 +141,6 @@ async def save_resume_data_directly(db, user_id: str, resume_data: dict) -> bool
         import traceback
         traceback.print_exc()
         return False
-
-
-def extract_response_type_and_buttons(response_text: str) -> tuple:
-    """
-    Extract response type tag from agent's response and determine buttons.
-    
-    Args:
-        response_text: The agent's response text
-        
-    Returns:
-        tuple: (cleaned_response, buttons_list)
-    """
-    # Look for [RESPONSE_TYPE: ...] tag
-    pattern = r'\[RESPONSE_TYPE:\s*(\w+)\]'
-    match = re.search(pattern, response_text, re.IGNORECASE)
-    
-    buttons = []
-    cleaned_response = response_text
-    
-    if match:
-        response_type = match.group(1).lower()
-        # Remove the tag from the response
-        cleaned_response = re.sub(pattern, '', response_text, flags=re.IGNORECASE).strip()
-        
-        print(f"📌 Detected response type: {response_type}")
-        
-        if response_type == "show_program_buttons":
-            # User is aligned - show program buttons
-            buttons = [
-                {"name": "Software Finishing School", "callback": "sfs"},
-                {"name": "#1 + 1 on 1 Placement Support", "callback": "ps"},
-                {"name": "Job Support", "callback": "js"}
-            ]
-            print(f"✅ Adding {len(buttons)} program buttons")
-        elif response_type == "not_aligned":
-            # User is not aligned - no buttons
-            print(f"⚠️ User not aligned with Alumnx focus - no buttons")
-        else:
-            print(f"⚠️ Unknown response type: {response_type}")
-    else:
-        print(f"ℹ️ No response type tag found in agent response")
-    
-    return cleaned_response, buttons
 
 
 @traceable(name="Learning Agent", tags=["agent", "career-guidance"])
@@ -382,7 +339,7 @@ async def run_learning_agent(
             # Add resume context if available
             resume_context = ""
             if resume_data:
-                resume_context = f"\n\nNote: The user just uploaded their resume with the following information:\n{json.dumps(resume_data, indent=2)}\n\nPlease acknowledge the resume upload and provide relevant career guidance based on the information in the resume. Then evaluate if their background and goals align with Alumnx's focus (React, Data Science, AI/ML, Software Engineering)."
+                resume_context = f"\n\nNote: The user just uploaded their resume with the following information:\n{json.dumps(resume_data, indent=2)}\n\nPlease acknowledge the resume upload and provide relevant career guidance based on the information in the resume."
             
             user_prompt = prompt_loader.format(
                 "general_conversation_user_with_message",
@@ -451,14 +408,8 @@ async def run_learning_agent(
             
             return response_obj
         else:
-            # ============================================================
-            # EXTRACT BUTTONS BASED ON RESPONSE TYPE
-            # ============================================================
-            cleaned_response, buttons = extract_response_type_and_buttons(final_response)
-            
             return {
-                "message": cleaned_response,
-                "buttons": buttons,
+                "message": final_response,
                 "status": "success",
                 "messages": result["messages"],
             }
