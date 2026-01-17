@@ -34,7 +34,7 @@ class TaskAssignment(BaseModel):
     taskId: str
     assignedBy: Literal["user", "admin"] = "admin"
     sequenceId: Optional[int] = None
-    isCompleted: bool = False
+    taskStatus: Literal["pending", "active", "completed"] = "pending"  # Changed from isCompleted
     expectedCompletionDate: Optional[str] = None
     completionDate: Optional[str] = None
     comments: List[Comment] = Field(default_factory=list)
@@ -58,7 +58,7 @@ class TaskResponse(BaseModel):
     projectName: str
     assignedBy: Literal["user", "admin"]
     sequenceId: Optional[int] = None
-    isCompleted: bool
+    taskStatus: Literal["pending", "active", "completed"]  # Changed from isCompleted
     expectedCompletionDate: Optional[str] = None
     completionDate: Optional[str] = None
     comments: List[Comment] = Field(default_factory=list)

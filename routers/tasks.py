@@ -179,7 +179,7 @@ async def get_user_tasks(request: Request, user_id: str):
             projectName=project_name,
             assignedBy=task_assignment.get("assignedBy", "admin"),
             sequenceId=task_assignment.get("sequenceId"),
-            isCompleted=task_assignment.get("isCompleted", False),
+            taskStatus=task_assignment.get("taskStatus", "pending"),
             expectedCompletionDate=task_assignment.get("expectedCompletionDate"),
             completionDate=task_assignment.get("completionDate"),
             comments=task_assignment.get("comments", [])
@@ -224,7 +224,7 @@ async def mark_task_complete(request: Request, user_id: str, task_id: str):
         {"userId": user_id, "tasks.taskId": task_id},
         {
             "$set": {
-                "tasks.$.isCompleted": True,
+                "tasks.$.taskStatus": "completed",  # Changed from isCompleted: True
                 "tasks.$.completionDate": datetime.now().isoformat()
             }
         }
@@ -247,7 +247,7 @@ async def mark_task_incomplete(request: Request, user_id: str, task_id: str):
         {"userId": user_id, "tasks.taskId": task_id},
         {
             "$set": {
-                "tasks.$.isCompleted": False,
+                "tasks.$.taskStatus": "pending",  # Changed from isCompleted: False
                 "tasks.$.completionDate": None
             }
         }
@@ -326,3 +326,25 @@ async def delete_assigned_tasks(request: Request, user_id: str):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to clear assigned tasks: {str(e)}")
+    
+
+@router.put("/user-tasks/{user_id}/{task_id}/active", status_code=200)
+async def mark_task_active(request: Request, user_id: str, task_id: str):
+    """
+    Mark a task as active for a user.
+    """
+    db = request.app.state.db
+    
+    result = await db.assignments.update_one(
+        {"userId": user_id, "tasks.taskId": task_id},
+        {
+            "$set": {
+                "tasks.$.taskStatus": "active"
+            }
+        }
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Task assignment not found")
+    
+    return {"status": "success", "message": "Task marked as active"}
