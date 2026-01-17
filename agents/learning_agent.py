@@ -15,6 +15,7 @@ from .utils.response_parser import parse_json_from_response, parse_llm_content
 from .utils.task_validator import validate_and_enrich_tasks, format_tasks_message
 from .utils.tools import create_agent_tools
 from .utils.agent_name_handler import handle_agent_name_update
+from .utils.callback_handler import handle_button_callback, is_button_callback
 
 
 def get_learning_agent(db):
@@ -278,6 +279,30 @@ async def run_learning_agent(
             }
             await db.chats.insert_one(user_chat_doc)
             print(f"✅ User message saved")
+        
+        # ============================================================
+        # STEP 2.5: Handle Button Callbacks (sfs, ps, js)
+        # ============================================================
+        if user_message and is_button_callback(user_message):
+            print(f"🔘 Button callback detected: {user_message}")
+            callback_response = handle_button_callback(user_message)
+            
+            if callback_response:
+                # Save callback response to chat
+                agent_chat_doc = {
+                    "userId": user_id,
+                    "userType": "agent",
+                    "message": callback_response["message"],
+                    "timestamp": datetime.now()
+                }
+                await db.chats.insert_one(agent_chat_doc)
+                print(f"✅ Callback response saved to chat")
+                
+                # Return callback response with skip_save flag
+                return {
+                    **callback_response,
+                    "skip_save": True  # Already saved above
+                }
         
         # ============================================================
         # STEP 3: User exists - get last 20 chat messages
