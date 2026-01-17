@@ -12,9 +12,10 @@ router = APIRouter()
 
 
 class AgentRequest(BaseModel):
-    """Simplified request model for agent endpoint"""
+    """Request model for agent endpoint with optional resume data"""
     userId: str
     message: Optional[str] = None
+    resumeData: Optional[Dict[str, Any]] = None  # ← NEW: Accept resume data
 
 
 class ManageAgentRequest(BaseModel):
@@ -41,20 +42,24 @@ async def chat_with_agent(request: Request, agent_req: AgentRequest = Body(...))
     """
     Invoke the learning agent for a user.
     Accepts optional message parameter for conversational queries or task updates.
+    Accepts optional resumeData parameter when user uploads their resume.
     Returns message, tasks array, and buttons array for UI rendering.
     """
     db = request.app.state.db
     user_id = agent_req.userId
     message = agent_req.message
+    resume_data = agent_req.resumeData  # ← NEW: Get resume data from request
 
     print(f"🚀 Agent invoked for user: {user_id}")
     if message:
         print(f"💬 With message: {message}")
+    if resume_data:
+        print(f"📄 With resume data: {list(resume_data.keys())}")
 
     try:
-        # Regular learning agent invocation with optional message
+        # Regular learning agent invocation with optional message and resume data
         print("⚙️ Running learning agent...")
-        result = await run_learning_agent(db, user_id, message)
+        result = await run_learning_agent(db, user_id, message, resume_data)  # ← UPDATED: Pass resume_data
         
         agent_response = result.get("message", "I couldn't process your request.")
         status = result.get("status", "error")
@@ -160,10 +165,10 @@ async def manage_agent(request: Request, agent_req: ManageAgentRequest = Body(..
 
     print("=" * 80)
     print(f"📝 MANAGE AGENT REQUEST")
-    print(f"📝 Received userId: {user_id}")
-    print(f"📝 userId type: {type(user_id)}")
-    print(f"📝 userId length: {len(user_id)}")
-    print(f"📝 Agent name: {agent_name}")
+    print(f"📍 Received userId: {user_id}")
+    print(f"📍 userId type: {type(user_id)}")
+    print(f"📍 userId length: {len(user_id)}")
+    print(f"📍 Agent name: {agent_name}")
     print("=" * 80)
 
     # Validate agent name
@@ -246,9 +251,9 @@ async def get_agent(request: Request, agent_req: GetAgentRequest = Body(...)):
 
     print("=" * 80)
     print(f"🔍 GET AGENT REQUEST")
-    print(f"🔍 Received userId: {user_id}")
-    print(f"🔍 userId type: {type(user_id)}")
-    print(f"🔍 userId length: {len(user_id)}")
+    print(f"📍 Received userId: {user_id}")
+    print(f"📍 userId type: {type(user_id)}")
+    print(f"📍 userId length: {len(user_id)}")
     print("=" * 80)
 
     # Find agent document

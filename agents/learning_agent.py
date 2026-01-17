@@ -5,6 +5,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
 from langsmith import traceable
 from datetime import datetime
+import json
 
 from .config.settings import Config
 from .prompts.loader import PromptLoader
@@ -26,9 +27,9 @@ def get_learning_agent(db):
         def __init__(self, database):
             self.db = database
 
-        async def ainvoke(self, user_id: str, message: str = None):
+        async def ainvoke(self, user_id: str, message: str = None, resume_data: dict = None):
             """Invoke the agent for a specific user."""
-            return await run_learning_agent(self.db, user_id, message)
+            return await run_learning_agent(self.db, user_id, message, resume_data)
 
     return SimpleLearningAgent(db)
 
@@ -64,7 +65,6 @@ Respond ONLY with the JSON object, nothing else."""
         response = parse_llm_content(result.content).strip()
         
         # Parse JSON response
-        import json
         import re
         
         # Extract JSON from response
@@ -83,12 +83,90 @@ Respond ONLY with the JSON object, nothing else."""
         return {'is_name': False, 'extracted_name': ''}
 
 
+async def save_resume_data_directly(db, user_id: str, resume_data: dict) -> bool:
+    """
+    Directly save resume data to the userdata collection.
+    Called when user uploads a resume.
+    
+    Args:
+        db: Database connection
+        user_id: User's ID
+        resume_data: Parsed resume data from resume parser API
+        
+    Returns:
+        bool: True if saved successfully, False otherwise
+    """
+    try:
+        print(f"\n{'='*60}")
+        print(f"📄 SAVING RESUME DATA")
+        print(f"{'='*60}")
+        print(f"User ID: {user_id}")
+        print(f"Resume data keys: {list(resume_data.keys())}")
+        
+        # Create userdata document
+        userdata_doc = {
+            "userId": user_id,
+            "resumeData": resume_data,
+            "uploadedAt": datetime.now(),
+            "lastUpdated": datetime.now()
+        }
+        
+        # Upsert: update if exists, insert if doesn't
+        result = await db.userdata.update_one(
+            {"userId": user_id},
+            {
+                "$set": {
+                    "resumeData": resume_data,
+                    "lastUpdated": datetime.now()
+                },
+                "$setOnInsert": {
+                    "uploadedAt": datetime.now()
+                }
+            },
+            upsert=True
+        )
+        
+        if result.upserted_id:
+            print(f"✅ New resume data inserted with ID: {result.upserted_id}")
+        elif result.modified_count > 0:
+            print(f"✅ Existing resume data updated")
+        else:
+            print(f"⚠️ No changes made to resume data (data unchanged)")
+        
+        print(f"{'='*60}\n")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error saving resume data: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 @traceable(name="Learning Agent", tags=["agent", "career-guidance"])
-async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict:
+async def run_learning_agent(
+    db, 
+    user_id: str, 
+    user_message: str = None, 
+    resume_data: dict = None
+) -> dict:
+    """
+    Run the learning agent for a user.
+    
+    Args:
+        db: Database connection
+        user_id: User's ID (phone number)
+        user_message: Optional message from user
+        resume_data: Optional resume data from resume parser
+        
+    Returns:
+        dict: Response with message, status, tasks, buttons, etc.
+    """
     try:
         print(f"\n{'='*60}")
         print(f"🚀 Starting learning agent for user: {user_id}")
         print(f"📝 User message: {user_message}")
+        print(f"📄 Resume data: {'Yes' if resume_data else 'No'}")
         print(f"{'='*60}\n")
 
         # Validate configuration
@@ -100,7 +178,26 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
             temperature=Config.LLM_TEMPERATURE,
         )
 
+        # ============================================================
+        # STEP 0: Handle Resume Data if Present
+        # ============================================================
+        if resume_data:
+            print(f"\n📄 RESUME DATA DETECTED - Saving to database")
+            save_success = await save_resume_data_directly(db, user_id, resume_data)
+            
+            if save_success:
+                print(f"✅ Resume data saved successfully")
+                # Update the message to inform the agent
+                if not user_message or user_message == "User uploaded the resume.":
+                    user_message = "User uploaded the resume."
+            else:
+                print(f"⚠️ Failed to save resume data")
+                if not user_message or user_message == "User uploaded the resume.":
+                    user_message = "User tried to upload resume but there was an error saving it."
+
+        # ============================================================
         # STEP 1: Check if userId exists in chat collection
+        # ============================================================
         existing_chat = await db.chats.find_one({"userId": user_id})
         
         if not existing_chat:
@@ -125,7 +222,9 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
                 "skip_save": True
             }
         
+        # ============================================================
         # STEP 2: Save user's incoming message FIRST
+        # ============================================================
         if user_message:
             print(f"💾 Saving user message to chat history")
             user_chat_doc = {
@@ -137,7 +236,9 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
             await db.chats.insert_one(user_chat_doc)
             print(f"✅ User message saved")
         
+        # ============================================================
         # STEP 3: User exists - get last 20 chat messages
+        # ============================================================
         print("📚 Existing user - fetching chat history")
         chat_history_cursor = db.chats.find(
             {"userId": user_id}
@@ -148,7 +249,9 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
         
         print(f"📜 Retrieved {len(chat_history)} chat messages")
         
+        # ============================================================
         # STEP 4: Check if user is providing a name
+        # ============================================================
         name_check = await check_if_name_response(llm, user_message, chat_history)
         
         if name_check['is_name']:
@@ -171,7 +274,7 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
             )
             print(f"✅ Saved agent name: {agent_name}")
             
-            # Create greeting response WITHOUT button text (buttons will be rendered separately)
+            # Create greeting response WITHOUT button text
             greeting = f"Hola! {agent_name} at your service."
             
             # Define buttons in WhatsApp format
@@ -198,7 +301,9 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
                 "skip_save": True
             }
         
+        # ============================================================
         # STEP 5: Normal conversation flow - not a name
+        # ============================================================
         print("💬 Regular conversation - proceeding with normal flow")
         
         # Initialize prompt loader
@@ -230,11 +335,17 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
             user_prompt = prompt_loader.format("task_assignment_user", user_id=user_id)
         else:
             system_prompt = prompt_loader.format("general_conversation_system", agent_name=agent_name)
+            
+            # Add resume context if available
+            resume_context = ""
+            if resume_data:
+                resume_context = f"\n\nNote: The user just uploaded their resume with the following information:\n{json.dumps(resume_data, indent=2)}\n\nPlease acknowledge the resume upload and provide relevant career guidance based on the information in the resume."
+            
             user_prompt = prompt_loader.format(
                 "general_conversation_user_with_message",
                 user_message=user_message,
                 user_id=user_id
-            )
+            ) + resume_context
 
         print("🤖 Creating LangGraph ReAct agent...\n")
 
@@ -242,7 +353,7 @@ async def run_learning_agent(db, user_id: str, user_message: str = None) -> dict
         agent = create_react_agent(llm, tools)
 
         print("✅ Agent created\n")
-        print("📄 Running agent...\n")
+        print("🔄 Running agent...\n")
 
         # Run the agent
         result = await agent.ainvoke(

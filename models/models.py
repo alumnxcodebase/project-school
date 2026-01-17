@@ -64,6 +64,15 @@ class ProjectWithTasks(BaseModel):
     created_at: datetime
     tasks: List[Task] = Field(default_factory=list)
 
+class BulkTaskItem(BaseModel):
+    title: str
+    description: Optional[str] = None
+    status: str = "pending"
+
+class BulkLoadTasksRequest(BaseModel):
+    projectId: str
+    tasks: List[BulkTaskItem]
+
 class Chat(BaseModel):
     id: Optional[str] = None
     userId: str

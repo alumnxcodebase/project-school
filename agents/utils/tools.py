@@ -176,4 +176,108 @@ def create_agent_tools(db):
             traceback.print_exc()
             return f"Error saving chat: {str(e)}"
 
-    return [get_user_goals, get_assigned_projects, get_tasks_for_project, get_chat_history, save_chat_history]
+    @tool
+    async def save_resume_data(user_id: str, resume_data: dict) -> str:
+        """
+        Save parsed resume data to the userdata collection.
+        This tool is automatically called when a user uploads their resume.
+        
+        Args:
+            user_id: The user's ID (phone number)
+            resume_data: Complete parsed resume data from the resume parser API
+        
+        Returns:
+            Success or error message
+        """
+        try:
+            print(f"\n📄 Saving resume data for user: {user_id}")
+            print(f"📊 Resume data keys: {list(resume_data.keys())}")
+            
+            # Create userdata document
+            userdata_doc = {
+                "userId": user_id,
+                "resumeData": resume_data,
+                "uploadedAt": datetime.now(),
+                "lastUpdated": datetime.now()
+            }
+            
+            # Upsert: update if exists, insert if doesn't
+            result = await db.userdata.update_one(
+                {"userId": user_id},
+                {
+                    "$set": {
+                        "resumeData": resume_data,
+                        "lastUpdated": datetime.now()
+                    },
+                    "$setOnInsert": {
+                        "uploadedAt": datetime.now()
+                    }
+                },
+                upsert=True
+            )
+            
+            if result.upserted_id:
+                print(f"✅ New resume data inserted with ID: {result.upserted_id}")
+                action = "saved"
+            elif result.modified_count > 0:
+                print(f"✅ Existing resume data updated")
+                action = "updated"
+            else:
+                print(f"⚠️ No changes made to resume data")
+                action = "verified"
+            
+            return f"Resume data {action} successfully for user {user_id}"
+            
+        except Exception as e:
+            print(f"❌ Error saving resume data: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return f"Error saving resume data: {str(e)}"
+
+    @tool
+    async def get_resume_data(user_id: str) -> str:
+        """
+        Retrieve saved resume data for a user.
+        Use this to access previously uploaded resume information.
+        
+        Args:
+            user_id: The user's ID
+        
+        Returns:
+            Resume data or error message
+        """
+        try:
+            print(f"\n📄 Fetching resume data for user: {user_id}")
+            
+            userdata = await db.userdata.find_one({"userId": user_id})
+            
+            if not userdata or "resumeData" not in userdata:
+                print("⚠️ No resume data found")
+                return "No resume data found for this user. User should upload their resume first."
+            
+            resume_data = userdata["resumeData"]
+            uploaded_at = userdata.get("uploadedAt", "Unknown")
+            
+            print(f"✅ Found resume data (uploaded: {uploaded_at})")
+            
+            # Format resume data for the agent
+            import json
+            formatted_data = json.dumps(resume_data, indent=2)
+            
+            return f"Resume data for user {user_id}:\n\n{formatted_data}"
+            
+        except Exception as e:
+            print(f"❌ Error fetching resume data: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return f"Error fetching resume data: {str(e)}"
+
+    return [
+        get_user_goals, 
+        get_assigned_projects, 
+        get_tasks_for_project, 
+        get_chat_history, 
+        save_chat_history,
+        save_resume_data,
+        get_resume_data
+    ]

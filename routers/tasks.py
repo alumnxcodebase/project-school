@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, Body, HTTPException
-from models import Task, TaskUpdate, UserTaskLink, TaskResponse
+from models import Task, TaskUpdate, UserTaskLink, TaskResponse, BulkLoadTasksRequest
 from utils.helpers import serialize
 from bson import ObjectId
 from typing import List, Optional, Literal
@@ -378,4 +378,72 @@ async def update_task_completion_status(request: Request, payload: dict = Body(.
         "status": "success",
         "message": f"Task completion status updated to {'completed' if is_completed else 'pending'}",
         "isCompleted": is_completed
+    }
+
+@router.post("/bulk-load-tasks", status_code=201)
+async def bulk_load_tasks(request: Request, payload: BulkLoadTasksRequest = Body(...)):
+    """
+    Bulk load tasks for a project with deduplication by task name.
+    """
+    db = request.app.state.db
+    
+    project_id = payload.projectId
+    tasks = payload.tasks
+    
+    if not project_id:
+        raise HTTPException(status_code=400, detail="projectId is required")
+    
+    if not tasks:
+        raise HTTPException(status_code=400, detail="tasks array is required and cannot be empty")
+    
+    # Validate ObjectId format
+    if not ObjectId.is_valid(project_id):
+        raise HTTPException(status_code=400, detail="Invalid project ID format")
+    
+    # Verify project exists - CONVERT TO ObjectId
+    project = await db.projects.find_one({"_id": ObjectId(project_id)})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Get existing task names for this project
+    existing_tasks = await db.tasks.find({"project_id": project_id}).to_list(None)
+    existing_names = {task.get("title") for task in existing_tasks}
+    
+    # Filter out duplicates and prepare new tasks
+    new_tasks = []
+    skipped_count = 0
+    
+    for task_data in tasks:
+        task_title = task_data.title.strip()
+        
+        if not task_title:
+            skipped_count += 1
+            continue
+        
+        if task_title in existing_names:
+            skipped_count += 1
+            continue
+        
+        # Create task object
+        task_dict = {
+            "project_id": project_id,
+            "title": task_title,
+            "description": task_data.description,
+            "status": task_data.status
+        }
+        
+        new_tasks.append(task_dict)
+        existing_names.add(task_title)
+    
+    # Insert all new tasks
+    inserted_count = 0
+    if new_tasks:
+        result = await db.tasks.insert_many(new_tasks)
+        inserted_count = len(result.inserted_ids)
+    
+    return {
+        "status": "success",
+        "inserted": inserted_count,
+        "skipped": skipped_count,
+        "message": f"Loaded {inserted_count} tasks, skipped {skipped_count} duplicates"
     }
