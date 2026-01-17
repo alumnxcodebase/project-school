@@ -267,27 +267,22 @@ async def run_learning_agent(
             }
         
         # ============================================================
-        # STEP 2: Save user's incoming message FIRST
-        # ============================================================
-        if user_message:
-            print(f"💾 Saving user message to chat history")
-            user_chat_doc = {
-                "userId": user_id,
-                "userType": "user",
-                "message": user_message,
-                "timestamp": datetime.now()
-            }
-            await db.chats.insert_one(user_chat_doc)
-            print(f"✅ User message saved")
-        
-        # ============================================================
-        # STEP 2.5: Handle Button Callbacks (sfs, ps, js)
+        # STEP 1.5: Handle Button Callbacks FIRST (sfs, ps, js)
         # ============================================================
         if user_message and is_button_callback(user_message):
             print(f"🔘 Button callback detected: {user_message}")
             callback_response = handle_button_callback(user_message)
             
             if callback_response:
+                # Save user's callback message
+                user_chat_doc = {
+                    "userId": user_id,
+                    "userType": "user",
+                    "message": user_message,
+                    "timestamp": datetime.now()
+                }
+                await db.chats.insert_one(user_chat_doc)
+                
                 # Save callback response to chat
                 agent_chat_doc = {
                     "userId": user_id,
@@ -303,6 +298,20 @@ async def run_learning_agent(
                     **callback_response,
                     "skip_save": True  # Already saved above
                 }
+        
+        # ============================================================
+        # STEP 2: Save user's incoming message
+        # ============================================================
+        if user_message:
+            print(f"💾 Saving user message to chat history")
+            user_chat_doc = {
+                "userId": user_id,
+                "userType": "user",
+                "message": user_message,
+                "timestamp": datetime.now()
+            }
+            await db.chats.insert_one(user_chat_doc)
+            print(f"✅ User message saved")
         
         # ============================================================
         # STEP 3: User exists - get last 20 chat messages
