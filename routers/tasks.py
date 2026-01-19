@@ -15,7 +15,8 @@ from models import (
     TaskResponse, 
     TaskUpdate, 
     UserTaskLink,
-    Comment
+    Comment,
+    BulkLoadTasksRequest
 )
 
 class BulkTaskAssignment(BaseModel):
@@ -422,4 +423,46 @@ async def bulk_assign_tasks_to_user(request: Request, bulk_req: BulkAssignTasksR
         "status": "success",
         "message": f"Successfully assigned {len(tasks)} tasks to user {user_id}",
         "taskCount": len(tasks)
+    }
+
+@router.post("/bulk-add-tasks-to-project", status_code=201)
+async def bulk_add_tasks_to_project(request: Request, bulk_req: BulkLoadTasksRequest = Body(...)):
+    """
+    Bulk add multiple tasks to a specific project.
+    """
+    db = request.app.state.db
+    project_id = bulk_req.projectId
+    tasks = bulk_req.tasks
+    
+    print(f"📦 Bulk adding {len(tasks)} tasks to project: {project_id}")
+    
+    # Verify project exists
+    try:
+        project = await db.projects.find_one({"_id": ObjectId(project_id)})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid project ID format")
+        
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Prepare tasks for insertion
+    new_tasks = []
+    for task in tasks:
+        task_data = task.model_dump()
+        task_data["project_id"] = project_id
+        new_tasks.append(task_data)
+        
+    if not new_tasks:
+         return {"status": "success", "message": "No tasks provided", "count": 0}
+
+    # Insert tasks
+    result = await db.tasks.insert_many(new_tasks)
+    
+    print(f"✅ Bulk added {len(result.inserted_ids)} tasks to project {project_id}")
+    
+    return {
+        "status": "success", 
+        "message": f"Successfully created {len(result.inserted_ids)} tasks",
+        "projectId": project_id,
+        "taskIds": [str(id) for id in result.inserted_ids]
     }
