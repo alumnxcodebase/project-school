@@ -27,6 +27,7 @@ class Task(BaseModel):
     description: Optional[str] = None
     estimatedTime: float
     skillType: str
+    updatedAt: Optional[datetime] = None
 
 class TaskAssignment(BaseModel):
     """Individual task assignment details"""

@@ -7,7 +7,7 @@ from agents.learning_agent import run_learning_agent, handle_agent_name_update
 from bson import ObjectId
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-
+from agents.agent_conversation import check_and_send_task_reminders
 router = APIRouter()
 
 
@@ -292,3 +292,24 @@ async def get_agent(request: Request, agent_req: GetAgentRequest = Body(...)):
         "status": "success",
         "agent": serialize(agent)
     }
+
+# Add this new endpoint
+@router.post("/agent/conversation", status_code=200)
+async def agent_conversation(request: Request, agent_req: AgentRequest = Body(...)):
+    """
+    Check for active tasks due today and send WhatsApp reminders.
+    """
+    db = request.app.state.db
+    user_id = agent_req.userId
+    
+    print(f"🔔 Task reminder check for user: {user_id}")
+    
+    try:
+        result = await check_and_send_task_reminders(db, user_id)
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

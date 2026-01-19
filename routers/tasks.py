@@ -498,3 +498,62 @@ async def flush_tasks_by_category(request: Request, project_id: str, skill_type:
         "category": skill_type,
         "deletedCount": result.deleted_count
     }
+
+class UpdateTaskUpdatedDateRequest(BaseModel):
+    projectId: str
+
+@router.post("/update-task-updated-date", status_code=200)
+async def update_task_updated_date(request: Request, req: UpdateTaskUpdatedDateRequest = Body(...)):
+    """
+    Update updatedAt field for all tasks in a project that don't have it set.
+    Only updates tasks that don't already have an updatedAt value.
+    """
+    db = request.app.state.db
+    project_id = req.projectId
+    
+    print(f"📅 Updating updatedAt for tasks in project: {project_id}")
+    
+    # Verify project exists
+    try:
+        project = await db.projects.find_one({"_id": ObjectId(project_id)})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid project ID format")
+        
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Find tasks without updatedAt field or with null updatedAt
+    tasks_without_updated_at = await db.tasks.find({
+        "project_id": project_id,
+        "$or": [
+            {"updatedAt": {"$exists": False}},
+            {"updatedAt": None}
+        ]
+    }).to_list(length=None)
+    
+    if not tasks_without_updated_at:
+        return {
+            "status": "success",
+            "message": "All tasks already have updatedAt field",
+            "updatedCount": 0
+        }
+    
+    # Update each task incrementally with current datetime
+    current_datetime = datetime.now()
+    updated_count = 0
+    
+    for task in tasks_without_updated_at:
+        await db.tasks.update_one(
+            {"_id": task["_id"]},
+            {"$set": {"updatedAt": current_datetime}}
+        )
+        updated_count += 1
+    
+    print(f"✅ Updated {updated_count} tasks with updatedAt field")
+    
+    return {
+        "status": "success",
+        "message": f"Successfully updated {updated_count} tasks",
+        "projectId": project_id,
+        "updatedCount": updated_count
+    }
