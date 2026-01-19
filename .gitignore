@@ -53,3 +53,5 @@ htmlcov/
 
 # FastAPI
 .fastapi_cache/
+
+__pycache__
