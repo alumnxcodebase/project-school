@@ -466,3 +466,35 @@ async def bulk_add_tasks_to_project(request: Request, bulk_req: BulkLoadTasksReq
         "projectId": project_id,
         "taskIds": [str(id) for id in result.inserted_ids]
     }
+
+@router.delete("/project/{project_id}/category/{skill_type}", status_code=200)
+async def flush_tasks_by_category(request: Request, project_id: str, skill_type: str):
+    """
+    Flush (delete) all tasks in a project for a specific category (skillType).
+    """
+    db = request.app.state.db
+    
+    print(f"🧹 Flushing tasks for project {project_id} with category {skill_type}")
+    
+    # Delete tasks matching project_id and skillType
+    result = await db.tasks.delete_many({
+        "project_id": project_id,
+        "skillType": skill_type
+    })
+    
+    if result.deleted_count == 0:
+        return {
+             "status": "success",
+             "message": "No tasks found to delete",
+             "deletedCount": 0
+        }
+
+    print(f"✅ Flushed {result.deleted_count} tasks")
+    
+    return {
+        "status": "success", 
+        "message": f"Successfully deleted {result.deleted_count} tasks",
+        "projectId": project_id,
+        "category": skill_type,
+        "deletedCount": result.deleted_count
+    }

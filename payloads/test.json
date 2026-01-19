@@ -1,0 +1,921 @@
+[
+  {
+    "id": "696b9c4feb066fcbb580b0e2",
+    "name": "BookYard",
+    "description": "BookYard Project",
+    "projectType": "project",
+    "status": "active",
+    "created_at": "2026-01-17T14:26:58.574000",
+    "tasks": [
+      {
+        "id": "696b9faf783dac2f643df14d",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T01 - System context review",
+        "description": "Review the full BookYard system context including frontend, backend, data, and AI components. Focus on technical scope, integration points, scalability expectations, and constraints.",
+        "estimatedTime": 20.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df14e",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T02 - Define service boundaries",
+        "description": "Define clear logical boundaries between React frontend, FastAPI backend, recommendation service, RAG chatbot service, and semantic search service.",
+        "estimatedTime": 30.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df14f",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T03 - API contract strategy",
+        "description": "Decide API standards including REST conventions, versioning, error formats, pagination, and authentication headers.",
+        "estimatedTime": 25.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df150",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T04 - Authentication flow design",
+        "description": "Design end-to-end authentication flow including token lifecycle, refresh, frontend storage, and backend validation.",
+        "estimatedTime": 30.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df151",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T05 - Data ownership model",
+        "description": "Define ownership and access rules for books, users, interactions, embeddings, and ML artifacts.",
+        "estimatedTime": 20.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df152",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T06 - Initialize React app",
+        "description": "Create a React project using Vite and verify dev server, build, and linting setup.",
+        "estimatedTime": 20.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df153",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T07 - Frontend folder structure",
+        "description": "Organize folders for components, pages, hooks, services, assets, and utils to support long-term maintainability.",
+        "estimatedTime": 20.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df154",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T08 - Configure frontend routing",
+        "description": "Set up routing for auth pages, book list, book detail, recommendations, chatbot, and search pages.",
+        "estimatedTime": 30.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df155",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T09 - Layout components",
+        "description": "Build reusable layout components including header, navigation, footer, and responsive wrappers.",
+        "estimatedTime": 40.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df156",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T10 - API client abstraction",
+        "description": "Implement a centralized API client handling base URLs, headers, auth tokens, and error normalization.",
+        "estimatedTime": 30.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df157",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T11 - Initialize FastAPI app",
+        "description": "Create FastAPI project, virtual environment, install dependencies, and run a test endpoint.",
+        "estimatedTime": 20.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df158",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T12 - Backend project structure",
+        "description": "Organize backend into routers, schemas, models, services, config, and utils.",
+        "estimatedTime": 20.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df159",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T13 - Environment variable handling",
+        "description": "Set up environment variable loading and validation for secrets and configs.",
+        "estimatedTime": 15.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df15a",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T14 - Connect FastAPI to Supabase",
+        "description": "Configure Postgres connectivity and test basic read/write operations.",
+        "estimatedTime": 30.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df15b",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T15 - Base response schemas",
+        "description": "Define consistent API response and error schemas using Pydantic.",
+        "estimatedTime": 20.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df15c",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T16 - Users table schema",
+        "description": "Design users table with fields, constraints, and indexes.",
+        "estimatedTime": 20.0,
+        "skillType": "Data",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df15d",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T17 - Books table schema",
+        "description": "Design books table optimized for search, recommendations, and metadata enrichment.",
+        "estimatedTime": 25.0,
+        "skillType": "Data",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df15e",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T18 - Interactions table schema",
+        "description": "Create schema for tracking views, searches, borrows, and clicks.",
+        "estimatedTime": 25.0,
+        "skillType": "Data",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df15f",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T19 - Borrow requests table",
+        "description": "Design table to store borrow lifecycle events and statuses.",
+        "estimatedTime": 20.0,
+        "skillType": "Data",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df160",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T20 - Add DB indexes",
+        "description": "Add indexes for frequent query paths and ML workloads.",
+        "estimatedTime": 15.0,
+        "skillType": "Data",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df161",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T21 - User registration API",
+        "description": "Implement signup endpoint with validation and persistence.",
+        "estimatedTime": 30.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df162",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T22 - User login API",
+        "description": "Implement login endpoint with token issuance.",
+        "estimatedTime": 30.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df163",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T23 - Auth middleware",
+        "description": "Secure private routes using authentication dependencies.",
+        "estimatedTime": 25.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df164",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T24 - Book create API",
+        "description": "Allow authenticated users to add books with validation.",
+        "estimatedTime": 30.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df165",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T25 - Book list API",
+        "description": "Implement paginated and filterable book listing endpoint.",
+        "estimatedTime": 35.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df166",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T26 - Book detail UI",
+        "description": "Render detailed book view with metadata and actions.",
+        "estimatedTime": 35.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df167",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T27 - Book list UI",
+        "description": "Render paginated list with loading and empty states.",
+        "estimatedTime": 40.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df168",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T28 - Add book form UI",
+        "description": "Create controlled form with validation and submission logic.",
+        "estimatedTime": 30.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df169",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T29 - Borrow request UI",
+        "description": "Trigger borrow requests and show status feedback.",
+        "estimatedTime": 25.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df16a",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T30 - Frontend auth state",
+        "description": "Manage authenticated session state across the app.",
+        "estimatedTime": 30.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df16b",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T31 - Interaction logging",
+        "description": "Log user interactions for analytics and ML usage.",
+        "estimatedTime": 25.0,
+        "skillType": "Data",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df16c",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T32 - Data validation checks",
+        "description": "Add integrity and consistency checks for stored data.",
+        "estimatedTime": 20.0,
+        "skillType": "Data",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df16d",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T33 - Recommendation fundamentals",
+        "description": "Study content-based and collaborative filtering approaches.",
+        "estimatedTime": 30.0,
+        "skillType": "ML",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df16e",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T34 - Prepare ML dataset",
+        "description": "Extract and clean interaction data for model usage.",
+        "estimatedTime": 40.0,
+        "skillType": "ML",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df16f",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T35 - Popularity-based recommender",
+        "description": "Implement baseline recommender using interaction counts.",
+        "estimatedTime": 30.0,
+        "skillType": "ML",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df170",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T36 - Content similarity model",
+        "description": "Compute similarity between books using metadata embeddings.",
+        "estimatedTime": 45.0,
+        "skillType": "ML",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df171",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T37 - Recommendation evaluation",
+        "description": "Manually evaluate relevance and coverage of recommendations.",
+        "estimatedTime": 20.0,
+        "skillType": "ML",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df172",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T38 - Learn RAG patterns",
+        "description": "Understand retrieval-augmented generation pipelines.",
+        "estimatedTime": 25.0,
+        "skillType": "GenAI",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df173",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T39 - Book text chunking",
+        "description": "Chunk and normalize book text for embeddings.",
+        "estimatedTime": 30.0,
+        "skillType": "GenAI",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df174",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T40 - Generate embeddings",
+        "description": "Generate vector embeddings using an embedding model.",
+        "estimatedTime": 40.0,
+        "skillType": "GenAI",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df175",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T41 - Store embeddings",
+        "description": "Persist embeddings in a vector-capable store.",
+        "estimatedTime": 30.0,
+        "skillType": "GenAI",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df176",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T42 - RAG query pipeline",
+        "description": "Retrieve relevant chunks and generate LLM responses.",
+        "estimatedTime": 50.0,
+        "skillType": "GenAI",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df177",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T43 - Chatbot API",
+        "description": "Expose backend endpoint for conversational queries.",
+        "estimatedTime": 40.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df178",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T44 - Chatbot UI",
+        "description": "Build conversational UI with history and streaming.",
+        "estimatedTime": 40.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df179",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T45 - Semantic search concepts",
+        "description": "Understand embedding-based semantic search.",
+        "estimatedTime": 20.0,
+        "skillType": "GenAI",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df17a",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T46 - Semantic search API",
+        "description": "Implement natural language search using embeddings.",
+        "estimatedTime": 40.0,
+        "skillType": "GenAI",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df17b",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T47 - Search UI integration",
+        "description": "Integrate semantic search into frontend.",
+        "estimatedTime": 30.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df17c",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T48 - Dockerize backend",
+        "description": "Create Dockerfile and local container build.",
+        "estimatedTime": 25.0,
+        "skillType": "DevOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df17d",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T49 - Dockerize frontend",
+        "description": "Create production-ready frontend container.",
+        "estimatedTime": 25.0,
+        "skillType": "DevOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df17e",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T50 - CI pipeline setup",
+        "description": "Configure CI for linting, tests, and builds.",
+        "estimatedTime": 40.0,
+        "skillType": "DevOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df17f",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T51 - Backend deployment",
+        "description": "Deploy FastAPI backend to cloud platform.",
+        "estimatedTime": 40.0,
+        "skillType": "DevOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df180",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T52 - Frontend deployment",
+        "description": "Deploy React app and verify API connectivity.",
+        "estimatedTime": 30.0,
+        "skillType": "DevOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df181",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T53 - ML inference logging",
+        "description": "Log recommendation and chatbot inference events.",
+        "estimatedTime": 25.0,
+        "skillType": "MLOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df182",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T54 - Model versioning",
+        "description": "Introduce versioning for embeddings and recommenders.",
+        "estimatedTime": 20.0,
+        "skillType": "MLOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df183",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T55 - Monitor ML latency",
+        "description": "Track response times for ML-powered endpoints.",
+        "estimatedTime": 30.0,
+        "skillType": "MLOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df184",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T56 - Fallback strategies",
+        "description": "Implement graceful degradation for AI failures.",
+        "estimatedTime": 20.0,
+        "skillType": "MLOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df185",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T57 - Security review",
+        "description": "Review auth, data access, and API security risks.",
+        "estimatedTime": 30.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df186",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T58 - Performance review",
+        "description": "Review system bottlenecks and scaling concerns.",
+        "estimatedTime": 30.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df187",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T59 - Observability design",
+        "description": "Design logging, metrics, and tracing strategy.",
+        "estimatedTime": 25.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df188",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T60 - Architecture documentation",
+        "description": "Document final architecture and decisions.",
+        "estimatedTime": 30.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df189",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T61 - End-to-end test flow",
+        "description": "Execute full user journey testing across system.",
+        "estimatedTime": 40.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df18a",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T62 - Frontend error boundaries",
+        "description": "Implement error boundaries for UI stability.",
+        "estimatedTime": 20.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df18b",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T63 - Backend rate limiting",
+        "description": "Add basic rate limiting to APIs.",
+        "estimatedTime": 25.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df18c",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T64 - Data cleanup scripts",
+        "description": "Write scripts to clean inconsistent data.",
+        "estimatedTime": 30.0,
+        "skillType": "Data",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df18d",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T65 - Recommendation API",
+        "description": "Expose recommendation results via backend endpoint.",
+        "estimatedTime": 30.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df18e",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T66 - Recommendation UI",
+        "description": "Display personalized recommendations.",
+        "estimatedTime": 30.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df18f",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T67 - Prompt tuning for RAG",
+        "description": "Refine prompts for accurate book answers.",
+        "estimatedTime": 30.0,
+        "skillType": "GenAI",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df190",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T68 - Embedding refresh job",
+        "description": "Design periodic embedding regeneration.",
+        "estimatedTime": 25.0,
+        "skillType": "MLOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df191",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T69 - Load testing backend",
+        "description": "Run basic load tests on APIs.",
+        "estimatedTime": 30.0,
+        "skillType": "DevOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df192",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T70 - Scale strategy",
+        "description": "Define horizontal and vertical scaling approaches.",
+        "estimatedTime": 30.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df193",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T71 - Cache strategy",
+        "description": "Design caching for reads and ML outputs.",
+        "estimatedTime": 25.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df194",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T72 - API versioning plan",
+        "description": "Plan backward-compatible API evolution.",
+        "estimatedTime": 20.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df195",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T73 - Secrets management",
+        "description": "Secure secrets using environment or secret manager.",
+        "estimatedTime": 20.0,
+        "skillType": "DevOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df196",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T74 - Audit logging",
+        "description": "Add audit logs for critical actions.",
+        "estimatedTime": 25.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df197",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T75 - Retry logic",
+        "description": "Add retries for transient failures.",
+        "estimatedTime": 20.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df198",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T76 - Frontend performance tuning",
+        "description": "Optimize rendering and bundle size.",
+        "estimatedTime": 30.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df199",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T77 - Backend async optimization",
+        "description": "Optimize async DB and API calls.",
+        "estimatedTime": 30.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df19a",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T78 - Recommendation cold start",
+        "description": "Handle users with no interaction history.",
+        "estimatedTime": 25.0,
+        "skillType": "ML",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df19b",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T79 - Search relevance tuning",
+        "description": "Tune semantic search relevance thresholds.",
+        "estimatedTime": 30.0,
+        "skillType": "GenAI",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df19c",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T80 - Chatbot hallucination handling",
+        "description": "Add guardrails to reduce hallucinations.",
+        "estimatedTime": 30.0,
+        "skillType": "GenAI",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df19d",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T81 - Feature flags",
+        "description": "Introduce feature flags for AI features.",
+        "estimatedTime": 25.0,
+        "skillType": "DevOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df19e",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T82 - Observability dashboards",
+        "description": "Create dashboards for system health.",
+        "estimatedTime": 30.0,
+        "skillType": "DevOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df19f",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T83 - ML output sampling",
+        "description": "Sample ML outputs for quality review.",
+        "estimatedTime": 20.0,
+        "skillType": "MLOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1a0",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T84 - Data retention policy",
+        "description": "Define retention rules for logs and embeddings.",
+        "estimatedTime": 20.0,
+        "skillType": "Data",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1a1",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T85 - Backup strategy",
+        "description": "Define backup and recovery plan.",
+        "estimatedTime": 25.0,
+        "skillType": "DevOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1a2",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T86 - Chaos testing basics",
+        "description": "Simulate failure scenarios.",
+        "estimatedTime": 30.0,
+        "skillType": "DevOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1a3",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T87 - API documentation",
+        "description": "Generate and review OpenAPI docs.",
+        "estimatedTime": 20.0,
+        "skillType": "Backend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1a4",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T88 - Frontend accessibility",
+        "description": "Ensure basic accessibility compliance.",
+        "estimatedTime": 30.0,
+        "skillType": "Frontend",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1a5",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T89 - ML retraining trigger",
+        "description": "Define conditions for retraining models.",
+        "estimatedTime": 25.0,
+        "skillType": "MLOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1a6",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T90 - Cost monitoring",
+        "description": "Monitor infra and LLM usage costs.",
+        "estimatedTime": 20.0,
+        "skillType": "DevOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1a7",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T91 - Security headers",
+        "description": "Add security headers for frontend and backend.",
+        "estimatedTime": 20.0,
+        "skillType": "DevOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1a8",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T92 - Dependency auditing",
+        "description": "Audit dependencies for vulnerabilities.",
+        "estimatedTime": 20.0,
+        "skillType": "DevOps",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1a9",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T93 - Data anonymization",
+        "description": "Anonymize sensitive user data for ML usage.",
+        "estimatedTime": 25.0,
+        "skillType": "Data",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1aa",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T94 - Recommendation bias review",
+        "description": "Analyze and mitigate recommendation bias.",
+        "estimatedTime": 30.0,
+        "skillType": "ML",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1ab",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T95 - Search query analytics",
+        "description": "Analyze search query patterns.",
+        "estimatedTime": 20.0,
+        "skillType": "Data",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1ac",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T96 - Chatbot usage analytics",
+        "description": "Analyze chatbot interaction metrics.",
+        "estimatedTime": 20.0,
+        "skillType": "Data",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1ad",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T97 - SLA definition",
+        "description": "Define latency and uptime SLAs.",
+        "estimatedTime": 20.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1ae",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T98 - Incident response plan",
+        "description": "Define incident response procedures.",
+        "estimatedTime": 25.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1af",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T99 - Final architecture review",
+        "description": "Perform holistic review of the system.",
+        "estimatedTime": 30.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      },
+      {
+        "id": "696b9faf783dac2f643df1b0",
+        "project_id": "696b9c4feb066fcbb580b0e2",
+        "title": "T100 - Technical handover",
+        "description": "Prepare system for handover with docs and runbooks.",
+        "estimatedTime": 30.0,
+        "skillType": "Solution Architect",
+        "isAssigned": false
+      }
+    ]
+  },
+  {
+    "id": "696bcd97f492070602482b2e",
+    "name": "Geotag images on a Farm",
+    "description": "Geotag images on a Farm",
+    "projectType": "project",
+    "status": "active",
+    "created_at": "2026-01-17T17:57:19.780000",
+    "tasks": []
+  }
+]
