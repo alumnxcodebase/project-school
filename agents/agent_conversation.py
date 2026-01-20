@@ -10,10 +10,6 @@ async def check_and_send_task_reminders(db, user_id: str):
     try:
         print(f"\n📅 Checking active tasks for user: {user_id}")
         
-        # Get user details
-        user = await db.users.find_one({"_id": ObjectId(user_id)})
-        user_name = user.get("fullName", user.get("userName", "Student")) if user else "Student"
-        
         # Get user's assignments
         assignment = await db.assignments.find_one({"userId": user_id})
         
@@ -36,7 +32,6 @@ async def check_and_send_task_reminders(db, user_id: str):
             print(f"   Task {idx + 1}: taskStatus = '{task_status}' (type: {type(task_status)})")
             
             if task_status == "active":
-                
                 # Get task details
                 task_id = task_assignment.get("taskId")
                 print(f"   Found active task with taskId: {task_id}")
@@ -58,23 +53,18 @@ async def check_and_send_task_reminders(db, user_id: str):
                 "tasks": []
             }
         
-        # Prepare task list
         task_count = len(active_tasks)
-        task_list = "\n".join([f"{idx}. {task_name}" for idx, task_name in enumerate(active_tasks, 1)])
-        
-        # Prepare message variables
-        task_message = f"You have {task_count} task{'s' if task_count > 1 else ''} to complete:\n\n{task_list}"
         
         print(f"\n📱 Sending WhatsApp reminder for {task_count} tasks")
         
-        # Call WhatsApp API with multiple message variables
+        # Call WhatsApp API - Only send 2 variables ({{2}} and {{3}})
+        # {{1}} is automatically populated with userName in JavaScript
         whatsapp_payload = {
             "userIds": user_id,
             "templateId": "6926",
             "messageVariables": {
-                "1": user_name,
-                "2": "",
-                "3": task_message
+                "message1": "Gentle reminder to complete your tasks.",
+                "message2": "to Fork and Clone a repo."
             }
         }
         
