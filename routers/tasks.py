@@ -169,49 +169,66 @@ async def get_user_tasks(request: Request, user_id: str):
     """
     db = request.app.state.db
     
-    # Get user's assignment document
-    assignment = await db.assignments.find_one({"userId": user_id})
-    if not assignment or not assignment.get("tasks"):
-        return []
-    
-    # Collect all task responses
-    task_responses = []
-    
-    for task_assignment in assignment.get("tasks", []):
-        task_id = task_assignment.get("taskId")
+    try:
+        # Get user's assignment document
+        assignment = await db.assignments.find_one({"userId": user_id})
+        if not assignment or not assignment.get("tasks"):
+            return []
         
-        # Get task details
-        task = await db.tasks.find_one({"_id": ObjectId(task_id)})
-        if not task:
-            continue
+        # Collect all task responses
+        task_responses = []
         
-        # Get project details
-        project_id = task.get("project_id")
-        project = await db.projects.find_one({"_id": ObjectId(project_id)})
-        project_name = project.get("name", "Unknown Project") if project else "Unknown Project"
+        for task_assignment in assignment.get("tasks", []):
+            task_id = task_assignment.get("taskId")
+            
+            # Validate task_id format
+            if not task_id or not ObjectId.is_valid(task_id):
+                print(f"⚠️ Invalid task_id: {task_id}, skipping...")
+                continue
+            
+            # Get task details
+            task = await db.tasks.find_one({"_id": ObjectId(task_id)})
+            if not task:
+                print(f"⚠️ Task not found: {task_id}, skipping...")
+                continue
+            
+            # Get project details
+            project_id = task.get("project_id")
+            project_name = "Unknown Project"
+            
+            if project_id and ObjectId.is_valid(project_id):
+                project = await db.projects.find_one({"_id": ObjectId(project_id)})
+                if project:
+                    project_name = project.get("name", "Unknown Project")
+            
+            # Build response
+            task_response = TaskResponse(
+                taskId=task_id,
+                name=task.get("name", task.get("title", "Unnamed Task")),
+                description=task.get("description", ""),
+                estimatedTime=task.get("estimatedTime", 0),
+                skillType=task.get("skillType", "General"),
+                projectId=project_id if project_id else "",
+                projectName=project_name,
+                assignedBy=task_assignment.get("assignedBy", "admin"),
+                sequenceId=task_assignment.get("sequenceId"),
+                taskStatus=task_assignment.get("taskStatus", "pending"),
+                expectedCompletionDate=task_assignment.get("expectedCompletionDate"),
+                completionDate=task_assignment.get("completionDate"),
+                comments=task_assignment.get("comments", [])
+            )
+            task_responses.append(task_response)
         
-        # Build response
-        task_response = TaskResponse(
-            taskId=task_id,
-            name=task.get("name", task.get("title", "Unnamed Task")),
-            description=task.get("description", ""),
-            estimatedTime=task.get("estimatedTime", 0),
-            skillType=task.get("skillType", "General"),
-            projectId=project_id,
-            projectName=project_name,
-            assignedBy=task_assignment.get("assignedBy", "admin"),
-            sequenceId=task_assignment.get("sequenceId"),
-            taskStatus=task_assignment.get("taskStatus", "pending"),
-            expectedCompletionDate=task_assignment.get("expectedCompletionDate"),
-            completionDate=task_assignment.get("completionDate"),
-            comments=task_assignment.get("comments", [])
-        )
-        task_responses.append(task_response)
-    
-    # Sort by sequenceId
-    task_responses.sort(key=lambda x: x.sequenceId if x.sequenceId is not None else 999)
-    
-    return task_responses
+        # Sort by sequenceId
+        task_responses.sort(key=lambda x: x.sequenceId if x.sequenceId is not None else 999)
+        
+        return task_responses
+        
+    except Exception as e:
+        print(f"❌ Error in get_user_tasks: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error fetching user tasks: {str(e)}")
 
 
 @router.delete("/user-tasks/{user_id}/{task_id}", status_code=200)

@@ -168,3 +168,58 @@ async def get_project_tasks_assigned_to_user(
     )
     
     return response
+
+
+@router.delete("/{project_id}", status_code=200)
+async def delete_project(request: Request, project_id: str):
+    """
+    Delete a project and all associated data:
+    1. Delete all tasks in the project
+    2. Remove those tasks from user assignments
+    3. Delete the project itself
+    """
+    db = request.app.state.db
+    
+    # Validate project ID format
+    if not ObjectId.is_valid(project_id):
+        raise HTTPException(status_code=400, detail="Invalid Project ID format")
+    
+    # Check if project exists
+    project = await db.projects.find_one({"_id": ObjectId(project_id)})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    print(f"🗑️ Deleting project: {project_id}")
+    
+    # Step 1: Get all tasks for this project
+    tasks_cursor = db.tasks.find({"project_id": project_id})
+    tasks = await tasks_cursor.to_list(length=None)
+    task_ids = [str(task["_id"]) for task in tasks]
+    
+    print(f"📋 Found {len(task_ids)} tasks to delete")
+    
+    # Step 2: Remove these tasks from all user assignments
+    if task_ids:
+        # Remove tasks from assignments collection
+        result = await db.assignments.update_many(
+            {},  # Match all assignment documents
+            {"$pull": {"tasks": {"taskId": {"$in": task_ids}}}}
+        )
+        print(f"✅ Removed tasks from {result.modified_count} user assignments")
+    
+    # Step 3: Delete all tasks in this project
+    if task_ids:
+        delete_result = await db.tasks.delete_many({"project_id": project_id})
+        print(f"✅ Deleted {delete_result.deleted_count} tasks")
+    
+    # Step 4: Delete the project itself
+    await db.projects.delete_one({"_id": ObjectId(project_id)})
+    print(f"✅ Deleted project {project_id}")
+    
+    return {
+        "status": "success",
+        "message": f"Successfully deleted project and associated data",
+        "projectId": project_id,
+        "tasksDeleted": len(task_ids),
+        "assignmentsUpdated": result.modified_count if task_ids else 0
+    }
