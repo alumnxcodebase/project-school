@@ -1,9 +1,9 @@
-# projects.py
+# projects.py - Update endpoints
 from fastapi import APIRouter, Request, Body, HTTPException
 from models import Project, ProjectWithTasks, Task
 from utils.helpers import serialize
 from bson import ObjectId
-from typing import List
+from typing import List, Optional
 from models import (
     Project, 
     ProjectWithTasks, 
@@ -16,9 +16,24 @@ router = APIRouter()
 
 
 @router.get("/", response_model=List[Project])
-async def list_projects(request: Request):
+async def list_projects(request: Request, userId: Optional[str] = None):
+    """Get all projects - admin projects and user-created projects"""
     db = request.app.state.db
-    cursor = db.projects.find().sort("created_at", -1)
+    
+    # Build query to get admin projects (createdBy is None or admin user) 
+    # and projects created by the current user
+    if userId:
+        query = {
+            "$or": [
+                {"createdBy": None},  # Admin projects
+                {"createdBy": "6928870c5b168f52cf8bd77a"},  # Specific admin user
+                {"createdBy": userId}  # User's own projects
+            ]
+        }
+    else:
+        query = {}
+    
+    cursor = db.projects.find(query).sort("created_at", -1)
     return [serialize(doc) async for doc in cursor]
 
 
@@ -69,7 +84,6 @@ async def get_project_stats(request: Request, project_id: str):
         "total_time": sum(task.get("estimatedTime", 0) for task in tasks)
     }
 
-# Add this endpoint to projects.py
 
 @router.post("/get-project-tasks-assigned-to-user", response_model=ProjectWithTasksAndAssignment)
 async def get_project_tasks_assigned_to_user(

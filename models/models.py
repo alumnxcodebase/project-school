@@ -1,8 +1,16 @@
-# models.py
+"""
+High-Level Overview of models.py
+This file defines the core data models for a project-based learning and goal-tracking system.
+It is built using Pydantic and is designed to work well with a MongoDB-style backend.
+Key Concepts Covered:
+Overall, this file serves as the single source of truth for the platform’s data contracts,
+ensuring consistency across project management, learning workflows, and user progress tracking.
+"""
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Literal
 from datetime import datetime
 from bson import ObjectId
+
 
 class Project(BaseModel):
     model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
@@ -11,6 +19,7 @@ class Project(BaseModel):
     description: Optional[str] = None
     projectType: Literal["project", "training"] = "project"
     status: str = "active"
+    createdBy: Optional[str] = None  # Add this field
     created_at: datetime = Field(default_factory=datetime.now)
 
 class Comment(BaseModel):
