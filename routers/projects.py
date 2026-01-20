@@ -52,11 +52,11 @@ async def create_new_project(request: Request, project: Project = Body(...)):
     return serialize(new_project)
 
 
-@router.get("/{project_id}", response_model=ProjectWithTasks)
+@router.get("/{project_id}", response_model=ProjectWithTasksAndStatus)
 async def get_project_details(request: Request, project_id: str, userId: Optional[str] = None):
     """
     Get project details along with all associated tasks.
-    Returns tasks created by admin or the specified userId.
+    Returns tasks created by admin or the specified userId with their assignment status.
     """
     db = request.app.state.db
     
@@ -82,9 +82,28 @@ async def get_project_details(request: Request, project_id: str, userId: Optiona
     tasks_cursor = db.tasks.find(task_query)
     tasks = [serialize(task) async for task in tasks_cursor]
     
+    # Get user's assignments if userId is provided
+    task_status_map = {}
+    if userId:
+        assignment = await db.assignments.find_one({"userId": userId})
+        if assignment and assignment.get("tasks"):
+            for task_assignment in assignment.get("tasks", []):
+                task_status_map[task_assignment.get("taskId")] = task_assignment.get("taskStatus")
+    
+    # Add taskStatus to each task
+    tasks_with_status = []
+    for task in tasks:
+        task_id = task.get("id")
+        task_with_status = {
+            **task,
+            "taskStatus": task_status_map.get(task_id),
+            "isAssigned": task_id in task_status_map
+        }
+        tasks_with_status.append(task_with_status)
+    
     project_with_tasks = {
         **project_data,
-        "tasks": tasks
+        "tasks": tasks_with_status
     }
     
     return project_with_tasks

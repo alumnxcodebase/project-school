@@ -29,16 +29,18 @@ class Comment(BaseModel):
     commentBy: Literal["user", "admin"]
     createdAt: datetime = Field(default_factory=datetime.now)
 
+# Update models.py - Task model
+
 class Task(BaseModel):
     model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
-    id: Optional[str] = None  # ✅ Add this line
+    id: Optional[str] = None
     project_id: str
     title: str
     description: Optional[str] = None
     estimatedTime: float
     skillType: str
     createdBy: Optional[str] = None
-    updatedAt: Optional[datetime] = None
+    updatedAt: datetime = Field(default_factory=datetime.now)
 
 class TaskAssignment(BaseModel):
     """Individual task assignment details"""
@@ -205,3 +207,28 @@ class ProjectWithTasksAndAssignment(BaseModel):
     status: str = "active"
     created_at: datetime
     tasks: List[TaskWithAssignment] = Field(default_factory=list)
+
+class TaskWithStatus(BaseModel):
+    """Task model with assignment status"""
+    model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
+    id: Optional[str] = None
+    project_id: str
+    title: str
+    description: Optional[str] = None
+    estimatedTime: float
+    skillType: str
+    createdBy: Optional[str] = None
+    updatedAt: datetime = Field(default_factory=datetime.now)
+    taskStatus: Optional[Literal["pending", "active", "completed"]] = None
+    isAssigned: bool = False
+
+class ProjectWithTasksAndStatus(BaseModel):
+    """Response model for project details with tasks and their status"""
+    model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
+    id: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    projectType: Literal["project", "training"] = "project"
+    status: str = "active"
+    created_at: datetime
+    tasks: List[TaskWithStatus] = Field(default_factory=list)
