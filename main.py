@@ -30,7 +30,6 @@ async def lifespan(app: FastAPI):
         await db.agents.create_index([("userId", 1)], unique=True)
         print("✅ Unique index on agents.userId created successfully")
     except Exception as e:
-        # Index might already exist, that's okay
         print(f"ℹ️  Agents index: {str(e)}")
     
     # Create indexes for resources collection
@@ -63,6 +62,7 @@ app = FastAPI(title="Project + Agentic AI API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,  # Add this
     allow_methods=["*"],
     allow_headers=["*"],
 )
