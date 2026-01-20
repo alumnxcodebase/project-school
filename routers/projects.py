@@ -56,7 +56,7 @@ async def create_new_project(request: Request, project: Project = Body(...)):
 async def get_project_details(request: Request, project_id: str, userId: Optional[str] = None):
     """
     Get project details along with all associated tasks.
-    Returns tasks created by admin or the specified userId with their assignment status.
+    Returns tasks created by admin (6928870c5b168f52cf8bd77a) or the specified userId.
     Tasks are sorted by updatedAt in descending order (newest first).
     """
     db = request.app.state.db
@@ -70,19 +70,30 @@ async def get_project_details(request: Request, project_id: str, userId: Optiona
     
     project_data = serialize(project)
     
-    # Build query to get tasks created by admin or the specified user
-    task_query = {"project_id": project_id}
+    # Build query to get tasks created by admin OR the specified user
+    # Both project_id AND createdBy conditions must match
     if userId:
-        task_query["$or"] = [
-            {"createdBy": None},
-            {"createdBy": "admin"},
-            {"createdBy": "6928870c5b168f52cf8bd77a"},
-            {"createdBy": userId}
-        ]
+        task_query = {
+            "project_id": project_id,
+            "$or": [
+                {"createdBy": "6928870c5b168f52cf8bd77a"},  # Admin tasks
+                {"createdBy": userId}  # User's own tasks
+            ]
+        }
+    else:
+        # If no userId provided, only show admin tasks
+        task_query = {
+            "project_id": project_id,
+            "createdBy": "6928870c5b168f52cf8bd77a"
+        }
+    
+    print(f"🔍 Task query: {task_query}")
     
     # Sort by updatedAt descending (newest first)
     tasks_cursor = db.tasks.find(task_query).sort("updatedAt", -1)
     tasks = [serialize(task) async for task in tasks_cursor]
+    
+    print(f"✅ Found {len(tasks)} tasks for project {project_id}")
     
     # Get user's assignments if userId is provided
     task_status_map = {}
@@ -130,7 +141,7 @@ async def get_project_tasks_assigned_to_user(
     """
     Get all tasks for a project with assignment status for a specific user.
     Returns project details with tasks and isAssigned field for each task.
-    Only returns tasks created by admin or the specified user.
+    Only returns tasks created by admin (6928870c5b168f52cf8bd77a) or the specified user.
     Tasks are sorted by updatedAt in descending order (newest first).
     """
     db = request.app.state.db
@@ -143,19 +154,22 @@ async def get_project_tasks_assigned_to_user(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
-    # Get all tasks for this project (admin or user-created)
+    # Get tasks created by admin OR the user
     task_query = {
         "project_id": req.projectId,
         "$or": [
-            {"createdBy": None},
-            {"createdBy": "admin"},
-            {"createdBy": "6928870c5b168f52cf8bd77a"},
-            {"createdBy": req.userId}
+            {"createdBy": "6928870c5b168f52cf8bd77a"},  # Admin tasks
+            {"createdBy": req.userId}  # User's own tasks
         ]
     }
+    
+    print(f"🔍 Task query: {task_query}")
+    
     # Sort by updatedAt descending (newest first)
     tasks_cursor = db.tasks.find(task_query).sort("updatedAt", -1)
     tasks = await tasks_cursor.to_list(length=None)
+    
+    print(f"✅ Found {len(tasks)} tasks for project {req.projectId}")
     
     # Get user's assignments
     assignment = await db.assignments.find_one({"userId": req.userId})
