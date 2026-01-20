@@ -26,24 +26,29 @@ async def list_projects(request: Request, userId: Optional[str] = None):
         query = {
             "$or": [
                 {"createdBy": None},  # Admin projects
-                {"createdBy": "admin"},  # Admin user
+                {"createdBy": "6928870c5b168f52cf8bd77a"},  # Specific admin user
                 {"createdBy": userId}  # User's own projects
             ]
         }
     else:
         query = {}
     
+    print(f"🔍 Fetching projects with query: {query}")
     cursor = db.projects.find(query).sort("created_at", -1)
-    return [serialize(doc) async for doc in cursor]
+    projects = [serialize(doc) async for doc in cursor]
+    print(f"✅ Found {len(projects)} projects")
+    return projects
 
 
 @router.post("/", response_model=Project, status_code=201)
 async def create_new_project(request: Request, project: Project = Body(...)):
     db = request.app.state.db
     project_dict = project.model_dump(exclude={"id"})
+    print(f"📝 Creating project: {project_dict}")
     result = await db.projects.insert_one(project_dict)
 
     new_project = await db.projects.find_one({"_id": result.inserted_id})
+    print(f"✅ Created project with ID: {result.inserted_id}")
     return serialize(new_project)
 
 
@@ -70,6 +75,7 @@ async def get_project_details(request: Request, project_id: str, userId: Optiona
         task_query["$or"] = [
             {"createdBy": None},
             {"createdBy": "admin"},
+            {"createdBy": "6928870c5b168f52cf8bd77a"},
             {"createdBy": userId}
         ]
     
@@ -121,6 +127,7 @@ async def get_project_tasks_assigned_to_user(
         "$or": [
             {"createdBy": None},
             {"createdBy": "admin"},
+            {"createdBy": "6928870c5b168f52cf8bd77a"},
             {"createdBy": req.userId}
         ]
     }
