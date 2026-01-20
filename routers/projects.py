@@ -57,6 +57,7 @@ async def get_project_details(request: Request, project_id: str, userId: Optiona
     """
     Get project details along with all associated tasks.
     Returns tasks created by admin or the specified userId with their assignment status.
+    Tasks are sorted by updatedAt in descending order (newest first).
     """
     db = request.app.state.db
     
@@ -79,7 +80,8 @@ async def get_project_details(request: Request, project_id: str, userId: Optiona
             {"createdBy": userId}
         ]
     
-    tasks_cursor = db.tasks.find(task_query)
+    # Sort by updatedAt descending (newest first)
+    tasks_cursor = db.tasks.find(task_query).sort("updatedAt", -1)
     tasks = [serialize(task) async for task in tasks_cursor]
     
     # Get user's assignments if userId is provided
@@ -129,6 +131,7 @@ async def get_project_tasks_assigned_to_user(
     Get all tasks for a project with assignment status for a specific user.
     Returns project details with tasks and isAssigned field for each task.
     Only returns tasks created by admin or the specified user.
+    Tasks are sorted by updatedAt in descending order (newest first).
     """
     db = request.app.state.db
     
@@ -150,7 +153,8 @@ async def get_project_tasks_assigned_to_user(
             {"createdBy": req.userId}
         ]
     }
-    tasks_cursor = db.tasks.find(task_query)
+    # Sort by updatedAt descending (newest first)
+    tasks_cursor = db.tasks.find(task_query).sort("updatedAt", -1)
     tasks = await tasks_cursor.to_list(length=None)
     
     # Get user's assignments

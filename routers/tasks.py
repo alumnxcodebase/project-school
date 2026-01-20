@@ -64,6 +64,10 @@ async def create_task(request: Request, task: Task = Body(...)):
     """Create a new task"""
     db = request.app.state.db
     task_dict = task.model_dump(exclude={"id"})
+    
+    # Ensure updatedAt is set to current time
+    task_dict["updatedAt"] = datetime.now()
+    
     result = await db.tasks.insert_one(task_dict)
     created_task = await db.tasks.find_one({"_id": result.inserted_id})
     return serialize(created_task)
