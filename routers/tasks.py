@@ -39,10 +39,22 @@ def serialize(doc):
     return doc
 
 @router.get("/")
-async def get_all_tasks(request: Request, project_id: str = None):
-    """Get all tasks, optionally filtered by project_id"""
+async def get_all_tasks(request: Request, project_id: str = None, userId: str = None):
+    """Get all tasks, optionally filtered by project_id and userId (shows admin + user's own tasks)"""
     db = request.app.state.db
-    query = {"project_id": project_id} if project_id else {}
+    query = {}
+    
+    if project_id:
+        query["project_id"] = project_id
+    
+    # Filter tasks by createdBy if userId is provided
+    if userId:
+        query["$or"] = [
+            {"createdBy": None},
+            {"createdBy": "admin"},
+            {"createdBy": userId}
+        ]
+    
     cursor = db.tasks.find(query)
     return [serialize(doc) async for doc in cursor]
 
@@ -98,7 +110,7 @@ async def delete_task(request: Request, task_id: str):
     return None
 
 
-@router.post("/user-tasks", status_code=200)
+@router.post("/link-user-task", status_code=200)
 async def link_task_to_user(request: Request, link: UserTaskLink = Body(...)):
     """
     Link a task to a user by adding it to their assignments.
@@ -234,7 +246,7 @@ async def mark_task_complete(request: Request, user_id: str, task_id: str):
         {"userId": user_id, "tasks.taskId": task_id},
         {
             "$set": {
-                "tasks.$.taskStatus": "completed",  # Changed from isCompleted: True
+                "tasks.$.taskStatus": "completed",
                 "tasks.$.completionDate": datetime.now().isoformat()
             }
         }
@@ -246,80 +258,58 @@ async def mark_task_complete(request: Request, user_id: str, task_id: str):
     return {"status": "success", "message": "Task marked as complete"}
 
 
-@router.put("/user-tasks/{user_id}/{task_id}/incomplete", status_code=200)
-async def mark_task_incomplete(request: Request, user_id: str, task_id: str):
-    """
-    Mark a task as incomplete for a user.
-    """
-    db = request.app.state.db
-    
-    result = await db.assignments.update_one(
-        {"userId": user_id, "tasks.taskId": task_id},
-        {
-            "$set": {
-                "tasks.$.taskStatus": "pending",  # Changed from isCompleted: False
-                "tasks.$.completionDate": None
-            }
-        }
-    )
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Task assignment not found")
-    
-    return {"status": "success", "message": "Task marked as incomplete"}
-
-
-class AddCommentRequest(BaseModel):
-    comment: str
-    commentBy: str  # "user" or "admin"
-
-
-@router.post("/user-tasks/{user_id}/{task_id}/comments", status_code=200)
-async def add_task_comment(
+@router.put("/user-tasks/{user_id}/{task_id}/comment", status_code=200)
+async def add_comment_to_task(
     request: Request, 
     user_id: str, 
     task_id: str, 
-    comment_req: AddCommentRequest = Body(...)
+    comment: Comment = Body(...)
 ):
     """
-    Add a comment to a user's task assignment.
+    Add a comment to a user's task.
     """
     db = request.app.state.db
     
-    new_comment = Comment(
-        comment=comment_req.comment,
-        commentBy=comment_req.commentBy,
-        createdAt=datetime.now()
-    )
-    
     result = await db.assignments.update_one(
         {"userId": user_id, "tasks.taskId": task_id},
-        {"$push": {"tasks.$.comments": new_comment.model_dump()}}
+        {"$push": {"tasks.$.comments": comment.model_dump()}}
     )
     
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Task assignment not found")
     
-    return {"status": "success", "message": "Comment added successfully"}    
+    return {"status": "success", "message": "Comment added"}
 
-@router.delete("/delete-assigned-tasks/{user_id}", status_code=200)
-async def delete_assigned_tasks(request: Request, user_id: str):
+
+@router.delete("/user-tasks/{user_id}/clear", status_code=200)
+async def clear_all_user_tasks(request: Request, user_id: str):
     """
-    Clear all tasks assigned to a specific user in the assignments collection.
+    Clear all assigned tasks for a specific user.
+    Sets the tasks array to empty while preserving the assignment document.
     """
-    db = request.app.state.db
-
-    print(f"🗑️ Clearing all assigned tasks for user: {user_id}")
-
     try:
-        # Update the assignment document to clear the tasks array
+        db = request.app.state.db
+        
+        # Check if assignment exists
+        assignment = await db.assignments.find_one({"userId": user_id})
+        
+        if not assignment:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No assignment document found for user {user_id}"
+            )
+        
+        # Clear all tasks but keep the assignment document
         result = await db.assignments.update_one(
             {"userId": user_id},
             {"$set": {"tasks": []}}
         )
         
         if result.matched_count == 0:
-            raise HTTPException(status_code=404, detail="No assignments found for this user")
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Failed to update assignment for user {user_id}"
+            )
         
         print(f"✅ Cleared all tasks for user {user_id}")
         
