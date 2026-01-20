@@ -52,7 +52,7 @@ async def create_new_project(request: Request, project: Project = Body(...)):
     return serialize(new_project)
 
 
-@router.get("/{project_id}", response_model=ProjectWithTasksAndStatus)
+@router.get("/{project_id}", response_model=ProjectWithTasks)
 async def get_project_details(request: Request, project_id: str, userId: Optional[str] = None):
     """
     Get project details along with all associated tasks.
