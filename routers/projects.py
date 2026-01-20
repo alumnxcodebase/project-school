@@ -26,7 +26,7 @@ async def list_projects(request: Request, userId: Optional[str] = None):
         query = {
             "$or": [
                 {"createdBy": None},  # Admin projects
-                {"createdBy": "6928870c5b168f52cf8bd77a"},  # Specific admin user
+                {"createdBy": "admin"},  # Admin user
                 {"createdBy": userId}  # User's own projects
             ]
         }
@@ -48,9 +48,10 @@ async def create_new_project(request: Request, project: Project = Body(...)):
 
 
 @router.get("/{project_id}", response_model=ProjectWithTasks)
-async def get_project_details(request: Request, project_id: str):
+async def get_project_details(request: Request, project_id: str, userId: Optional[str] = None):
     """
     Get project details along with all associated tasks.
+    Returns tasks created by admin or the specified userId.
     """
     db = request.app.state.db
     
@@ -63,7 +64,16 @@ async def get_project_details(request: Request, project_id: str):
     
     project_data = serialize(project)
     
-    tasks_cursor = db.tasks.find({"project_id": project_id})
+    # Build query to get tasks created by admin or the specified user
+    task_query = {"project_id": project_id}
+    if userId:
+        task_query["$or"] = [
+            {"createdBy": None},
+            {"createdBy": "admin"},
+            {"createdBy": userId}
+        ]
+    
+    tasks_cursor = db.tasks.find(task_query)
     tasks = [serialize(task) async for task in tasks_cursor]
     
     project_with_tasks = {
@@ -93,6 +103,7 @@ async def get_project_tasks_assigned_to_user(
     """
     Get all tasks for a project with assignment status for a specific user.
     Returns project details with tasks and isAssigned field for each task.
+    Only returns tasks created by admin or the specified user.
     """
     db = request.app.state.db
     
@@ -104,8 +115,16 @@ async def get_project_tasks_assigned_to_user(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
-    # Get all tasks for this project
-    tasks_cursor = db.tasks.find({"project_id": req.projectId})
+    # Get all tasks for this project (admin or user-created)
+    task_query = {
+        "project_id": req.projectId,
+        "$or": [
+            {"createdBy": None},
+            {"createdBy": "admin"},
+            {"createdBy": req.userId}
+        ]
+    }
+    tasks_cursor = db.tasks.find(task_query)
     tasks = await tasks_cursor.to_list(length=None)
     
     # Get user's assignments
