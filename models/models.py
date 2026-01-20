@@ -31,6 +31,7 @@ class Comment(BaseModel):
 
 class Task(BaseModel):
     model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
+    id: Optional[str] = None  # ✅ Add this line
     project_id: str
     title: str
     description: Optional[str] = None
