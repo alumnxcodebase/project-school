@@ -40,7 +40,7 @@ class Task(BaseModel):
     estimatedTime: float
     skillType: str
     createdBy: Optional[str] = None
-    updatedAt: datetime = Field(default_factory=datetime.now)
+    updatedAt: Optional[datetime] = None
 
 class TaskAssignment(BaseModel):
     """Individual task assignment details"""
@@ -218,7 +218,7 @@ class TaskWithStatus(BaseModel):
     estimatedTime: float
     skillType: str
     createdBy: Optional[str] = None
-    updatedAt: datetime = Field(default_factory=datetime.now)
+    updatedAt: Optional[datetime] = None
     taskStatus: Optional[Literal["pending", "active", "completed"]] = None
     isAssigned: bool = False
 
