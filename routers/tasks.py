@@ -114,6 +114,54 @@ async def delete_task(request: Request, task_id: str):
     return None
 
 
+@router.put("/{task_id}/user/{user_id}")
+async def update_user_created_task(request: Request, task_id: str, user_id: str, task_update: TaskUpdate = Body(...)):
+    """Update a task only if created by the specified user"""
+    db = request.app.state.db
+    update_data = {k: v for k, v in task_update.model_dump().items() if v is not None}
+    
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    
+    # Check ownership and update
+    result = await db.tasks.update_one(
+        {"_id": ObjectId(task_id), "createdBy": user_id},
+        {"$set": update_data}
+    )
+    
+    if result.matched_count == 0:
+        # Check if task exists to return appropriate error
+        task = await db.tasks.find_one({"_id": ObjectId(task_id)})
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task.get("createdBy") != user_id:
+             raise HTTPException(status_code=403, detail="User not authorized to update this task")
+    
+    updated_task = await db.tasks.find_one({"_id": ObjectId(task_id)})
+    return serialize(updated_task)
+
+
+@router.delete("/{task_id}/user/{user_id}", status_code=204)
+async def delete_user_created_task(request: Request, task_id: str, user_id: str):
+    """Delete a task only if created by the specified user"""
+    db = request.app.state.db
+    
+    result = await db.tasks.delete_one({
+        "_id": ObjectId(task_id),
+        "createdBy": user_id
+    })
+    
+    if result.deleted_count == 0:
+        # Check if task exists to return appropriate error
+        task = await db.tasks.find_one({"_id": ObjectId(task_id)})
+        if not task:
+             raise HTTPException(status_code=404, detail="Task not found")
+        if task.get("createdBy") != user_id:
+             raise HTTPException(status_code=403, detail="User not authorized to delete this task")
+             
+    return None
+
+
 @router.post("/link-user-task", status_code=200)
 async def link_task_to_user(request: Request, link: UserTaskLink = Body(...)):
     """
