@@ -55,3 +55,6 @@ htmlcov/
 .fastapi_cache/
 
 __pycache__
+
+payloads/
+references
