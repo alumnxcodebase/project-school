@@ -653,3 +653,88 @@ async def update_task_updated_date(request: Request, req: UpdateTaskUpdatedDateR
         "projectId": project_id,
         "updatedCount": updated_count
     }
+class TriggerEmailRequest(BaseModel):
+    userId: str
+
+def get_ordinal_date_string(dt: datetime) -> str:
+    """Returns date in format: 22nd Feb 2026"""
+    suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(dt.day % 10 if dt.day > 20 or dt.day < 10 else 0, 'th')
+    return dt.strftime(f"%-d{suffix} %b %Y")
+
+@router.post("/trigger-email", status_code=200)
+async def trigger_email(request: Request, req: TriggerEmailRequest = Body(...)):
+    """
+    Trigger a templated email with user task progress stats.
+    """
+    db = request.app.state.db
+    user_id = req.userId
+    
+    # 1. Get user assignments
+    assignment = await db.assignments.find_one({"userId": user_id})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="User assignments not found")
+        
+    tasks = assignment.get("tasks", [])
+    
+    # 2. Calculate Stats
+    active_tasks = [t for t in tasks if t.get("taskStatus") == "active"]
+    completed_tasks = [t for t in tasks if t.get("taskStatus") == "completed"]
+    
+    active_count = len(active_tasks)
+    completed_count = len(completed_tasks)
+    total_relevant = active_count + completed_count
+    
+    if total_relevant > 0:
+        percentage = int((completed_count / total_relevant) * 100)
+    else:
+        percentage = 0
+        
+    formatted_percentage = f"{percentage}%"
+    
+    # 3. Get Active Task Names
+    active_task_names = []
+    if active_tasks:
+        active_ids = [ObjectId(t["taskId"]) for t in active_tasks if ObjectId.is_valid(t["taskId"])]
+        if active_ids:
+            cursor = db.tasks.find({"_id": {"$in": active_ids}})
+            async for task_doc in cursor:
+                # Prefer 'name', fall back to 'title'
+                name = task_doc.get("name") or task_doc.get("title") or "Unnamed Task"
+                active_task_names.append(name)
+    
+    agent_message3 = ", ".join(active_task_names) if active_task_names else "No active tasks"
+    
+    # 4. Prepare Payload
+    current_date = get_ordinal_date_string(datetime.now())
+    
+    email_payload = {
+        "userId": user_id,
+        "templateId": "2518b.6d1e43aa616e32a8.k1.a32f2371-f782-11f0-89cb-cabf48e1bf81.19be563ef1e",
+        "email_parameters": {
+            "date": current_date,
+            "agent_message1": "Hope you are doing well",
+            "agent_message2": formatted_percentage,
+            "agent_message3": agent_message3
+        }
+    }
+    
+    print(f"📧 Triggering email for {user_id}: {json.dumps(email_payload, indent=2)}")
+    
+    # 5. Send External Request
+    external_url = "https://api.alumnx.com/api/communication/sendTemplatedEmail"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(external_url, json=email_payload, timeout=10.0)
+            
+        if response.status_code >= 200 and response.status_code < 300:
+            return {"status": "success", "message": "Email triggered successfully", "external_response": response.json()}
+        else:
+            print(f"❌ Email API failed: {response.status_code} - {response.text}")
+            # Even if external fails, user prompt said "When it returns sucess, then return success."
+            # But usually we should warn. I will return 500 if external fails.
+            raise HTTPException(status_code=502, detail=f"External email service failed: {response.text}")
+            
+    except httpx.RequestError as e:
+        print(f"❌ Network error calling email API: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"Failed to connect to email service: {str(e)}")
