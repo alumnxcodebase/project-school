@@ -267,7 +267,8 @@ async def get_user_tasks(request: Request, user_id: str):
                 taskStatus=task_assignment.get("taskStatus", "pending"),
                 expectedCompletionDate=task_assignment.get("expectedCompletionDate"),
                 completionDate=task_assignment.get("completionDate"),
-                comments=task_assignment.get("comments", [])
+                comments=task_assignment.get("comments", []),
+                createdBy=task.get("createdBy")
             )
             task_responses.append(task_response)
         

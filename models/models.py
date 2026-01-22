@@ -76,6 +76,7 @@ class TaskResponse(BaseModel):
     expectedCompletionDate: Optional[str] = None
     completionDate: Optional[str] = None
     comments: List[Comment] = Field(default_factory=list)
+    createdBy: Optional[str] = None
 
 class ProjectWithTasks(BaseModel):
     """Response model for project details with associated tasks"""
