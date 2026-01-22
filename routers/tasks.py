@@ -285,9 +285,45 @@ async def get_user_tasks(request: Request, user_id: str):
 
 
 @router.delete("/user-tasks/{user_id}/{task_id}", status_code=200)
-async def unlink_task_from_user(request: Request, user_id: str, task_id: str):
+async def delete_task_and_assignments(request: Request, user_id: str, task_id: str):
     """
-    Remove a task from user's assignments.
+    If user is creator: Delete task and remove from ALL users' assignments.
+    If user is NOT creator: deny action (use unassign endpoint instead).
+    """
+    db = request.app.state.db
+    
+    # 1. Check task ownership
+    task = await db.tasks.find_one({"_id": ObjectId(task_id)})
+    if not task:
+         raise HTTPException(status_code=404, detail="Task not found")
+         
+    if task.get("createdBy") == user_id:
+        # User IS the creator: Delete task and cleanup ALL assignments
+        
+        # Delete the task document
+        await db.tasks.delete_one({"_id": ObjectId(task_id)})
+        
+        # Remove this task from ALL assignments documents
+        await db.assignments.update_many(
+            {"tasks.taskId": task_id},
+            {"$pull": {"tasks": {"taskId": task_id}}}
+        )
+        
+        return {"status": "success", "message": "Task deleted and removed from all assignments"}
+    
+    else:
+        # User is NOT the creator
+        raise HTTPException(
+            status_code=403, 
+            detail="Only the creator can delete this task. Use /task/user-task/{userId}/unassign/{taskId} to unassign yourself."
+        )
+
+
+@router.delete("/task/user-task/{user_id}/unassign/{task_id}", status_code=200)
+async def unassign_user_from_task(request: Request, user_id: str, task_id: str):
+    """
+    Remove a task from user's assignments (Unassign only).
+    Does not delete the task.
     """
     db = request.app.state.db
     
@@ -300,9 +336,9 @@ async def unlink_task_from_user(request: Request, user_id: str, task_id: str):
         raise HTTPException(status_code=404, detail="User assignment not found")
     
     if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Task not found in user's assignments")
+        return {"status": "success", "message": "Task was not in user's assignments"}
     
-    return {"status": "success", "message": "Task removed from user"}
+    return {"status": "success", "message": "Task removed from user assignments"}
 
 
 @router.put("/user-tasks/{user_id}/{task_id}/complete", status_code=200)
