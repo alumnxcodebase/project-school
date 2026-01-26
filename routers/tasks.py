@@ -702,7 +702,7 @@ async def trigger_email(request: Request, req: TriggerEmailRequest = Body(...)):
                 name = task_doc.get("name") or task_doc.get("title") or "Unnamed Task"
                 active_task_names.append(name)
     
-    agent_message3 = ", ".join(active_task_names) if active_task_names else "No active tasks"
+    agent_message3 = ", ".join(active_task_names) if active_task_names else "Oops! Looks like there are no tasks assigned to you. Please connect with Vijender and get yourself some tasks assigned to you at the earliest."
     
     # 4. Prepare Payload
     current_date = get_ordinal_date_string(datetime.now())
@@ -731,8 +731,6 @@ async def trigger_email(request: Request, req: TriggerEmailRequest = Body(...)):
             return {"status": "success", "message": "Email triggered successfully", "external_response": response.json()}
         else:
             print(f"❌ Email API failed: {response.status_code} - {response.text}")
-            # Even if external fails, user prompt said "When it returns sucess, then return success."
-            # But usually we should warn. I will return 500 if external fails.
             raise HTTPException(status_code=502, detail=f"External email service failed: {response.text}")
             
     except httpx.RequestError as e:
