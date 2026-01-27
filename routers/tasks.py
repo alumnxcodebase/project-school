@@ -702,7 +702,10 @@ async def trigger_email(request: Request, req: TriggerEmailRequest = Body(...)):
                 name = task_doc.get("name") or task_doc.get("title") or "Unnamed Task"
                 active_task_names.append(name)
     
-    agent_message3 = ", ".join(active_task_names) if active_task_names else "Oops! Looks like there are no tasks assigned to you. Please connect with Vijender and get yourself some tasks assigned to you at the earliest."
+    if active_task_names:
+        agent_message3 = "\n".join([f"{i+1}. {name}" for i, name in enumerate(active_task_names)])
+    else:
+        agent_message3 = "Oops! Looks like there are no tasks assigned to you. Please connect with Vijender and get yourself some tasks assigned to you at the earliest."
     
     # 4. Prepare Payload
     current_date = get_ordinal_date_string(datetime.now())
