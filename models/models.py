@@ -41,6 +41,7 @@ class Task(BaseModel):
     skillType: str
     createdBy: Optional[str] = None
     updatedAt: Optional[datetime] = None
+    isEnabled: bool = False
 
 class TaskAssignment(BaseModel):
     """Individual task assignment details"""
@@ -77,6 +78,7 @@ class TaskResponse(BaseModel):
     completionDate: Optional[str] = None
     comments: List[Comment] = Field(default_factory=list)
     createdBy: Optional[str] = None
+    isEnabled: bool = False
 
 class ProjectWithTasks(BaseModel):
     """Response model for project details with associated tasks"""
@@ -94,6 +96,7 @@ class BulkTaskItem(BaseModel):
     description: Optional[str] = None
     estimatedTime: float
     skillType: str
+    isEnabled: bool = False
 
 class BulkLoadTasksRequest(BaseModel):
     projectId: str
@@ -116,6 +119,7 @@ class TaskUpdate(BaseModel):
     estimatedTime: Optional[float] = None
     skillType: Optional[str] = None
     priority: Optional[str] = None
+    isEnabled: Optional[bool] = None
 
 class UserTaskLink(BaseModel):
     userId: str
@@ -192,6 +196,7 @@ class TaskWithAssignment(BaseModel):
     estimatedTime: float
     skillType: str
     isAssigned: bool = False
+    isEnabled: bool = False
 
 class GetProjectTasksRequest(BaseModel):
     """Request model for getting project tasks with assignment status"""
@@ -222,6 +227,7 @@ class TaskWithStatus(BaseModel):
     updatedAt: Optional[datetime] = None
     taskStatus: Optional[Literal["pending", "active", "completed"]] = None
     isAssigned: bool = False
+    isEnabled: bool = False
 
 class ProjectWithTasksAndStatus(BaseModel):
     """Response model for project details with tasks and their status"""

@@ -79,7 +79,7 @@ async def get_project_details(request: Request, project_id: str, userId: Optiona
             {"createdBy": userId}
         ]
     
-    # ONLY CHANGE: Add sorting by updatedAt descending (newest first)
+    # Add sorting by updatedAt descending (newest first)
     tasks_cursor = db.tasks.find(task_query).sort([("updatedAt", -1)])
     tasks = [serialize(task) async for task in tasks_cursor]
     
@@ -91,14 +91,15 @@ async def get_project_details(request: Request, project_id: str, userId: Optiona
             for task_assignment in assignment.get("tasks", []):
                 task_status_map[task_assignment.get("taskId")] = task_assignment.get("taskStatus")
     
-    # Add taskStatus to each task
+    # Add taskStatus and isEnabled to each task
     tasks_with_status = []
     for task in tasks:
         task_id = task.get("id")
         task_with_status = {
             **task,
             "taskStatus": task_status_map.get(task_id),
-            "isAssigned": task_id in task_status_map
+            "isAssigned": task_id in task_status_map,
+            "isEnabled": task.get("isEnabled", False)
         }
         tasks_with_status.append(task_with_status)
     
@@ -151,7 +152,7 @@ async def get_project_tasks_assigned_to_user(
             {"createdBy": req.userId}
         ]
     }
-    # ONLY CHANGE: Add sorting by updatedAt descending (newest first)
+    # Add sorting by updatedAt descending (newest first)
     tasks_cursor = db.tasks.find(task_query).sort([("updatedAt", -1)])
     tasks = await tasks_cursor.to_list(length=None)
     
@@ -162,7 +163,7 @@ async def get_project_tasks_assigned_to_user(
     if assignment and assignment.get("tasks"):
         assigned_task_ids = {task.get("taskId") for task in assignment.get("tasks", [])}
     
-    # Build response with isAssigned field
+    # Build response with isAssigned and isEnabled fields
     tasks_with_assignment = []
     for task in tasks:
         task_id = str(task["_id"])
@@ -173,7 +174,8 @@ async def get_project_tasks_assigned_to_user(
             description=task.get("description"),
             estimatedTime=task.get("estimatedTime", 0),
             skillType=task.get("skillType", "General"),
-            isAssigned=(task_id in assigned_task_ids)
+            isAssigned=(task_id in assigned_task_ids),
+            isEnabled=task.get("isEnabled", False)
         )
         tasks_with_assignment.append(task_with_assignment)
     
