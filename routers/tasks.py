@@ -248,40 +248,41 @@ async def get_user_tasks(request: Request, user_id: str):
         if not assignment or not assignment.get("tasks"):
             return []
         
+        # Collect all task responses
         task_responses = []
         
         for task_assignment in assignment.get("tasks", []):
             task_id = task_assignment.get("taskId")
-            if not task_id:
+            
+            # Validate task_id format
+            if not task_id or not ObjectId.is_valid(task_id):
+                print(f"⚠️ Invalid task_id: {task_id}, skipping...")
                 continue
-                
+            
             # Get task details
-            try:
-                task = await db.tasks.find_one({"_id": ObjectId(task_id)})
-            except Exception:
-                continue
-                
+            task = await db.tasks.find_one({"_id": ObjectId(task_id)})
             if not task:
+                print(f"⚠️ Task not found: {task_id}, skipping...")
                 continue
             
             # Get project details
             project_id = task.get("project_id")
-            project = None
-            if project_id:
-                try:
-                    project = await db.projects.find_one({"_id": ObjectId(project_id)})
-                except Exception:
-                    pass
+            project_name = "Unknown Project"
+            
+            if project_id and ObjectId.is_valid(project_id):
+                project = await db.projects.find_one({"_id": ObjectId(project_id)})
+                if project:
+                    project_name = project.get("name", "Unknown Project")
             
             # Build response
             task_response = TaskResponse(
-                taskId=str(task["_id"]),
-                name=task.get("title", task.get("name", "Unnamed Task")),
-                description=task.get("description"),
+                taskId=task_id,
+                name=task.get("name", task.get("title", "Unnamed Task")),
+                description=task.get("description", ""),
                 estimatedTime=task.get("estimatedTime", 0),
                 skillType=task.get("skillType", "General"),
                 projectId=project_id if project_id else "",
-                projectName=project.get("name") if project else "Unknown Project",
+                projectName=project_name,
                 assignedBy=task_assignment.get("assignedBy", "admin"),
                 sequenceId=task_assignment.get("sequenceId"),
                 taskStatus=task_assignment.get("taskStatus", "pending"),
@@ -291,206 +292,250 @@ async def get_user_tasks(request: Request, user_id: str):
                 createdBy=task.get("createdBy"),
                 isEnabled=task.get("isEnabled", False)
             )
-            
             task_responses.append(task_response)
+        
+        # Sort by sequenceId
+        task_responses.sort(key=lambda x: x.sequenceId if x.sequenceId is not None else 999)
         
         return task_responses
         
     except Exception as e:
-        print(f"Error fetching user tasks: {str(e)}")
+        print(f"❌ Error in get_user_tasks: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching user tasks: {str(e)}")
 
 
-@router.post("/update-task-status", status_code=200)
-async def update_task_status(request: Request, update_data: Dict[str, Any] = Body(...)):
+@router.delete("/user-tasks/{user_id}/{task_id}", status_code=200)
+async def delete_task_and_assignments(request: Request, user_id: str, task_id: str):
     """
-    Update the status of a task in user's assignment.
-    Expected payload: {"userId": "...", "taskId": "...", "taskStatus": "active|completed|pending"}
-    """
-    db = request.app.state.db
-    
-    user_id = update_data.get("userId")
-    task_id = update_data.get("taskId")
-    new_status = update_data.get("taskStatus")
-    
-    if not all([user_id, task_id, new_status]):
-        raise HTTPException(status_code=400, detail="Missing required fields")
-    
-    if new_status not in ["pending", "active", "completed"]:
-        raise HTTPException(status_code=400, detail="Invalid status")
-    
-    # Find user's assignment
-    assignment = await db.assignments.find_one({"userId": user_id})
-    if not assignment:
-        raise HTTPException(status_code=404, detail="User assignment not found")
-    
-    # Update the specific task's status
-    result = await db.assignments.update_one(
-        {"userId": user_id, "tasks.taskId": task_id},
-        {"$set": {"tasks.$.taskStatus": new_status}}
-    )
-    
-    if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Task not found in user's assignments")
-    
-    return {"status": "success", "message": "Task status updated"}
-
-
-@router.post("/update-task-completion-date", status_code=200)
-async def update_task_completion_date(request: Request, update_data: Dict[str, Any] = Body(...)):
-    """
-    Update the completion date of a task in user's assignment.
-    Expected payload: {"userId": "...", "taskId": "...", "completionDate": "YYYY-MM-DD"}
+    If user is creator: Delete task and remove from ALL users' assignments.
+    If user is NOT creator: deny action (use unassign endpoint instead).
     """
     db = request.app.state.db
     
-    user_id = update_data.get("userId")
-    task_id = update_data.get("taskId")
-    completion_date = update_data.get("completionDate")
+    # 1. Check task ownership
+    task = await db.tasks.find_one({"_id": ObjectId(task_id)})
+    if not task:
+         raise HTTPException(status_code=404, detail="Task not found")
+         
+    if task.get("createdBy") == user_id:
+        # User IS the creator: Delete task and cleanup ALL assignments
+        
+        # Delete the task document
+        await db.tasks.delete_one({"_id": ObjectId(task_id)})
+        
+        # Remove this task from ALL assignments documents
+        await db.assignments.update_many(
+            {"tasks.taskId": task_id},
+            {"$pull": {"tasks": {"taskId": task_id}}}
+        )
+        
+        return {"status": "success", "message": "Task deleted and removed from all assignments"}
     
-    if not all([user_id, task_id, completion_date]):
-        raise HTTPException(status_code=400, detail="Missing required fields")
-    
-    # Find user's assignment
-    assignment = await db.assignments.find_one({"userId": user_id})
-    if not assignment:
-        raise HTTPException(status_code=404, detail="User assignment not found")
-    
-    # Update the specific task's completion date
-    result = await db.assignments.update_one(
-        {"userId": user_id, "tasks.taskId": task_id},
-        {"$set": {"tasks.$.completionDate": completion_date}}
-    )
-    
-    if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Task not found in user's assignments")
-    
-    return {"status": "success", "message": "Task completion date updated"}
+    else:
+        # User is NOT the creator
+        raise HTTPException(
+            status_code=403, 
+            detail="Only the creator can delete this task. Use /task/user-task/{userId}/unassign/{taskId} to unassign yourself."
+        )
 
 
-@router.post("/add-task-comment", status_code=200)
-async def add_task_comment(request: Request, comment_data: Dict[str, Any] = Body(...)):
+@router.delete("/task/user-task/{user_id}/unassign/{task_id}", status_code=200)
+async def unassign_user_from_task(request: Request, user_id: str, task_id: str):
     """
-    Add a comment to a task in user's assignment.
-    Expected payload: {"userId": "...", "taskId": "...", "comment": "...", "commentBy": "user|admin"}
-    """
-    db = request.app.state.db
-    
-    user_id = comment_data.get("userId")
-    task_id = comment_data.get("taskId")
-    comment_text = comment_data.get("comment")
-    comment_by = comment_data.get("commentBy", "user")
-    
-    if not all([user_id, task_id, comment_text]):
-        raise HTTPException(status_code=400, detail="Missing required fields")
-    
-    if comment_by not in ["user", "admin"]:
-        raise HTTPException(status_code=400, detail="Invalid commentBy value")
-    
-    # Create comment object
-    new_comment = Comment(
-        comment=comment_text,
-        commentBy=comment_by,
-        createdAt=datetime.now()
-    )
-    
-    # Find user's assignment
-    assignment = await db.assignments.find_one({"userId": user_id})
-    if not assignment:
-        raise HTTPException(status_code=404, detail="User assignment not found")
-    
-    # Add comment to the specific task
-    result = await db.assignments.update_one(
-        {"userId": user_id, "tasks.taskId": task_id},
-        {"$push": {"tasks.$.comments": new_comment.model_dump()}}
-    )
-    
-    if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Task not found in user's assignments")
-    
-    return {"status": "success", "message": "Comment added successfully"}
-
-
-@router.post("/unlink-user-task", status_code=200)
-async def unlink_task_from_user(request: Request, unlink_data: Dict[str, str] = Body(...)):
-    """
-    Remove a task from user's assignments.
-    Expected payload: {"userId": "...", "taskId": "..."}
+    Remove a task from user's assignments (Unassign only).
+    Does not delete the task.
     """
     db = request.app.state.db
     
-    user_id = unlink_data.get("userId")
-    task_id = unlink_data.get("taskId")
-    
-    if not all([user_id, task_id]):
-        raise HTTPException(status_code=400, detail="Missing required fields")
-    
-    # Remove task from user's assignment
     result = await db.assignments.update_one(
         {"userId": user_id},
         {"$pull": {"tasks": {"taskId": task_id}}}
     )
     
-    if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Task not found in user's assignments")
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User assignment not found")
     
-    return {"status": "success", "message": "Task unlinked from user"}
+    if result.modified_count == 0:
+        return {"status": "success", "message": "Task was not in user's assignments"}
+    
+    return {"status": "success", "message": "Task removed from user assignments"}
 
 
-@router.post("/bulk-assign-tasks", status_code=200)
-async def bulk_assign_tasks(request: Request, payload: BulkAssignTasksRequest = Body(...)):
+@router.put("/user-tasks/{user_id}/{task_id}/complete", status_code=200)
+async def mark_task_complete(request: Request, user_id: str, task_id: str):
     """
-    Assign multiple tasks to a user. Replaces all existing task assignments for the user.
+    Mark a task as completed for a user.
+    """
+    db = request.app.state.db
+    
+    result = await db.assignments.update_one(
+        {"userId": user_id, "tasks.taskId": task_id},
+        {
+            "$set": {
+                "tasks.$.taskStatus": "completed",
+                "tasks.$.completionDate": datetime.now().isoformat()
+            }
+        }
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Task assignment not found")
+    
+    return {"status": "success", "message": "Task marked as complete"}
+
+
+@router.put("/user-tasks/{user_id}/{task_id}/comment", status_code=200)
+async def add_comment_to_task(
+    request: Request, 
+    user_id: str, 
+    task_id: str, 
+    comment: Comment = Body(...)
+):
+    """
+    Add a comment to a user's task.
+    """
+    db = request.app.state.db
+    
+    result = await db.assignments.update_one(
+        {"userId": user_id, "tasks.taskId": task_id},
+        {"$push": {"tasks.$.comments": comment.model_dump()}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Task assignment not found")
+    
+    return {"status": "success", "message": "Comment added"}
+
+
+@router.delete("/user-tasks/{user_id}/clear", status_code=200)
+async def clear_all_user_tasks(request: Request, user_id: str):
+    """
+    Clear all assigned tasks for a specific user.
+    Sets the tasks array to empty while preserving the assignment document.
+    """
+    try:
+        db = request.app.state.db
+        
+        # Check if assignment exists
+        assignment = await db.assignments.find_one({"userId": user_id})
+        
+        if not assignment:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No assignment document found for user {user_id}"
+            )
+        
+        # Clear all tasks but keep the assignment document
+        result = await db.assignments.update_one(
+            {"userId": user_id},
+            {"$set": {"tasks": []}}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Failed to update assignment for user {user_id}"
+            )
+        
+        print(f"✅ Cleared all tasks for user {user_id}")
+        
+        return {
+            "status": "success",
+            "message": f"Successfully cleared all assigned tasks for user {user_id}",
+            "userId": user_id
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error clearing assigned tasks: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to clear assigned tasks: {str(e)}")
+    
+
+@router.put("/user-tasks/{user_id}/{task_id}/active", status_code=200)
+async def mark_task_active(request: Request, user_id: str, task_id: str):
+    """
+    Mark a task as active for a user.
+    """
+    db = request.app.state.db
+    
+    result = await db.assignments.update_one(
+        {"userId": user_id, "tasks.taskId": task_id},
+        {
+            "$set": {
+                "tasks.$.taskStatus": "active"
+            }
+        }
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Task assignment not found")
+    
+    return {"status": "success", "message": "Task marked as active"}
+
+@router.post("/bulk-assign-tasks-to-user", status_code=200)
+async def bulk_assign_tasks_to_user(request: Request, bulk_req: BulkAssignTasksRequest = Body(...)):
+    """
+    Bulk assign multiple tasks to a user with their sequence IDs.
+    Replaces all existing task assignments for the user.
     
     Request body:
     {
         "userId": "user123",
         "tasks": [
             {"taskId": "task1", "sequenceId": 1},
-            {"taskId": "task2", "sequenceId": 2}
+            {"taskId": "task2", "sequenceId": 2},
+            {"taskId": "task3", "sequenceId": 3}
         ]
     }
     """
     db = request.app.state.db
-    user_id = payload.userId
-    tasks = payload.tasks
+    user_id = bulk_req.userId
+    tasks = bulk_req.tasks
 
-    print(f"📦 Assigning {len(tasks)} tasks to user: {user_id}")
+    print(f"📦 Bulk assigning {len(tasks)} tasks to user: {user_id}")
 
     # Verify all tasks exist
-    task_ids = [t.taskId for t in tasks]
+    task_ids = [task.taskId for task in tasks]
     existing_tasks = await db.tasks.find(
-        {"_id": {"$in": [ObjectId(tid) for tid in task_ids if ObjectId.is_valid(tid)]}}
+        {"_id": {"$in": [ObjectId(tid) for tid in task_ids]}}
     ).to_list(length=None)
     
-    if len(existing_tasks) != len(task_ids):
-        raise HTTPException(status_code=404, detail="One or more tasks not found")
-
-    # Delete all existing assignments for this user
-    delete_result = await db.assignments.delete_many({"userId": user_id})
-    print(f"🗑️ Deleted existing assignment document")
-
-    # Create new assignments
-    if tasks:
-        task_assignments = [
-            TaskAssignment(
-                taskId=task.taskId,
-                sequenceId=task.sequenceId,
-                assignedBy="admin",
-                taskStatus="pending"
-            )
-            for task in tasks
-        ]
-        
-        new_assignment = Assignment(
-            userId=user_id,
-            tasks=task_assignments
+    existing_task_ids = {str(task["_id"]) for task in existing_tasks}
+    invalid_tasks = set(task_ids) - existing_task_ids
+    
+    if invalid_tasks:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Tasks not found: {', '.join(invalid_tasks)}"
         )
-        
-        await db.assignments.insert_one(new_assignment.model_dump(exclude={"id"}))
-        print(f"✅ Created new assignment with {len(tasks)} tasks")
+
+    # Create task assignments
+    task_assignments = [
+        TaskAssignment(
+            taskId=task.taskId,
+            assignedBy="admin",
+            sequenceId=task.sequenceId,
+            taskStatus="pending",
+            expectedCompletionDate=None
+        ).model_dump()
+        for task in tasks
+    ]
+
+    # Upsert assignment document (replace all tasks)
+    result = await db.assignments.update_one(
+        {"userId": user_id},
+        {
+            "$set": {"tasks": task_assignments}
+        },
+        upsert=True
+    )
+
+    print(f"✅ Bulk assigned {len(tasks)} tasks to user {user_id}")
     
     return {
         "status": "success",
