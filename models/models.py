@@ -113,6 +113,12 @@ class Goal(BaseModel):
     userId: str
     goals: str
 
+class UserPreferences(BaseModel):
+    """Model for user skill preferences"""
+    userId: str
+    preferences: List[str]  # e.g., ["Frontend", "AI"] or ["All"]
+    updated_at: datetime = Field(default_factory=datetime.now)
+
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
