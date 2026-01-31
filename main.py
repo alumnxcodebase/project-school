@@ -5,7 +5,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
-from routers import projects, chat, goals, tasks, assignedprojects
+from routers import projects, chat, goals, tasks, assignedprojects, preferences
 from agents.learning_agent import get_learning_agent
 
 load_dotenv()
@@ -51,6 +51,14 @@ async def lifespan(app: FastAPI):
         print("✅ Assignedprojects indexes created successfully")
     except Exception as e:
         print(f"ℹ️  Assignedprojects indexes: {str(e)}")
+        
+    # Create indexes for preferences collection
+    print("🔧 Creating indexes on preferences collection...")
+    try:
+        await db.preferences.create_index([("userId", 1)], unique=True)
+        print("✅ Preferences indexes created successfully")
+    except Exception as e:
+        print(f"ℹ️  Preferences indexes: {str(e)}")
 
     print("🚀 API and Agent Ready")
     yield
@@ -74,6 +82,7 @@ app.include_router(projects.router, prefix="/projects", tags=["Projects"])
 app.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
 app.include_router(chat.router, prefix="/chat", tags=["Chat"])
 app.include_router(assignedprojects.router, prefix="/assignedprojects", tags=["Assigned Projects"])
+app.include_router(preferences.router, prefix="/preferences", tags=["Preferences"])
 
 
 @app.get("/health")
