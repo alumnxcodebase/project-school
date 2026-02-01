@@ -12,6 +12,16 @@ Classify the user's intent into one of these categories:
    - "What's the roadmap to become an AI engineer?"
    - "Can you help me with my resume?"
 
+3. "buddy_response" - User is responding to a Study Buddy proactive nudge, choosing a skill, adjusting schedule, or asking for the NEXT sequential task. Examples:
+   - "Frontend"
+   - "I'll do Backend today"
+   - "next task"
+   - "assign the next task"
+   - "I'm busy"
+   - "Contact me next week"
+   - "Yes, assign it"
+   - "No"
+
 User message: "{user_message}"
 
-Respond with ONLY one word: either "task_assignment" or "general_conversation"
+Respond with ONLY one word: either "task_assignment", "general_conversation", or "buddy_response"
