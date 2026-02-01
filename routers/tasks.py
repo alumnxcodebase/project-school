@@ -481,10 +481,11 @@ async def unassign_user_from_task(request: Request, user_id: str, task_id: str):
 @router.put("/user-tasks/{user_id}/{task_id}/complete", status_code=200)
 async def mark_task_complete(request: Request, user_id: str, task_id: str):
     """
-    Mark a task as completed for a user.
+    Mark a task as completed for a user and trigger an agent proactive message.
     """
     db = request.app.state.db
     
+    # 1. Update task status
     result = await db.assignments.update_one(
         {"userId": user_id, "tasks.taskId": task_id},
         {
@@ -498,7 +499,36 @@ async def mark_task_complete(request: Request, user_id: str, task_id: str):
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Task assignment not found")
     
-    return {"status": "success", "message": "Task marked as complete"}
+    # 2. Get task details for the message
+    task = await db.tasks.find_one({"_id": ObjectId(task_id)})
+    if task:
+        task_name = task.get("name") or task.get("title") or "the task"
+    else:
+        task_name = "the task"
+    
+    # 3. Get agent name
+    agent_doc = await db.agents.find_one({"userId": user_id})
+    agent_name = agent_doc.get("agentName", "Study Buddy") if agent_doc else "Study Buddy"
+    
+    # 4. Insert proactive message into chats
+    # Check if a completion message was already sent recently to avoid duplicates if user toggles
+    proactive_message = f"Great! You've completed '{task_name}'. Shall I assign the next task, or would you like to shift your learning preferences?"
+    
+    chat_doc = {
+        "userId": user_id,
+        "userType": "agent",
+        "message": proactive_message,
+        "timestamp": datetime.now()
+    }
+    await db.chats.insert_one(chat_doc)
+    
+    print(f"🤖 [AGENT] Proactive message added for user {user_id} after completing {task_name}")
+    
+    return {
+        "status": "success", 
+        "message": "Task marked as complete",
+        "agentResponse": proactive_message
+    }
 
 
 @router.put("/user-tasks/{user_id}/{task_id}/comment", status_code=200)
