@@ -39,9 +39,12 @@ class Task(BaseModel):
     description: Optional[str] = None
     estimatedTime: float
     skillType: str
+    day: Optional[str] = None
+    taskType: Optional[Literal["Theory", "Practical"]] = None
     createdBy: Optional[str] = None
     updatedAt: Optional[datetime] = None
     isEnabled: bool = False
+    autoAssign: bool = True  # Defaults to True for backward compatibility
 
 class TaskAssignment(BaseModel):
     """Individual task assignment details"""
@@ -79,6 +82,8 @@ class TaskResponse(BaseModel):
     comments: List[Comment] = Field(default_factory=list)
     createdBy: Optional[str] = None
     isEnabled: bool = False
+    day: Optional[str] = None
+    taskType: Optional[Literal["Theory", "Practical"]] = None
 
 class ProjectWithTasks(BaseModel):
     """Response model for project details with associated tasks"""
@@ -97,6 +102,8 @@ class BulkTaskItem(BaseModel):
     estimatedTime: float
     skillType: str
     isEnabled: bool = False
+    day: Optional[str] = None
+    taskType: Optional[Literal["Theory", "Practical"]] = None
 
 class BulkLoadTasksRequest(BaseModel):
     projectId: str
@@ -126,6 +133,8 @@ class TaskUpdate(BaseModel):
     skillType: Optional[str] = None
     priority: Optional[str] = None
     isEnabled: Optional[bool] = None
+    day: Optional[str] = None
+    taskType: Optional[Literal["Theory", "Practical"]] = None
 
 class UserTaskLink(BaseModel):
     userId: str
@@ -201,6 +210,8 @@ class TaskWithAssignment(BaseModel):
     description: Optional[str] = None
     estimatedTime: float
     skillType: str
+    day: Optional[str] = None
+    taskType: Optional[Literal["Theory", "Practical"]] = None
     isAssigned: bool = False
     isEnabled: bool = False
 
@@ -229,6 +240,8 @@ class TaskWithStatus(BaseModel):
     description: Optional[str] = None
     estimatedTime: float
     skillType: str
+    day: Optional[str] = None
+    taskType: Optional[Literal["Theory", "Practical"]] = None
     createdBy: Optional[str] = None
     updatedAt: Optional[datetime] = None
     taskStatus: Optional[Literal["pending", "active", "completed"]] = None

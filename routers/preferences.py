@@ -30,7 +30,7 @@ async def manage_preferences(request: Request, prefs_req: ManagePreferencesReque
     print(f"Selected preferences: {preferences}")
 
     # Validate preferences based on allowed list (optional, but good practice)
-    allowed_skills = ["All", "Frontend", "Backend", "AI", "ML", "Devops", "Data Analysis", "Data"]
+    allowed_skills = ["All", "Frontend", "Backend", "AI", "ML", "Devops", "Data Analysis", "Data", "DSA", "Fullstack", "GenAI", "Analytics"]
     # Filter out any invalid skills just in case
     valid_preferences = [p for p in preferences if p in allowed_skills]
     
@@ -56,6 +56,20 @@ async def manage_preferences(request: Request, prefs_req: ManagePreferencesReque
     prefs_doc = await db.preferences.find_one({"userId": user_id})
     
     print(f"✅ Preferences {'updated' if result.modified_count > 0 else 'created'} successfully")
+    
+
+    # Insert proactive message from agent
+    prefs_list = ", ".join(valid_preferences)
+    proactive_msg = f"Looks like preferences has been set for {prefs_list}. From where do you want to start? Please choose from your preferences!"
+    
+    await db.chats.insert_one({
+        "userId": user_id,
+        "userType": "agent",
+        "message": proactive_msg,
+        "timestamp": datetime.now()
+    })
+    print(f"🤖 [AGENT] Proactive message added for user {user_id}")
+
     
     return {
         "status": "success",

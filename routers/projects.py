@@ -69,15 +69,41 @@ async def get_project_details(request: Request, project_id: str, userId: Optiona
     
     project_data = serialize(project)
     
+
+    
+    
     # Build query to get tasks created by admin or the specified user
     task_query = {"project_id": project_id}
-    if userId:
-        task_query["$or"] = [
+    
+    # Check if user is Admin
+    ADMIN_ID = "6928870c5b168f52cf8bd77a"
+    is_admin = userId == ADMIN_ID
+    
+    if userId and not is_admin:
+        # Standard visibility conditions for NON-ADMIN users
+        or_conditions = [
             {"createdBy": None},
             {"createdBy": "admin"},
-            {"createdBy": "6928870c5b168f52cf8bd77a"},
+            {"createdBy": ADMIN_ID},
             {"createdBy": userId}
         ]
+        
+        # Also include tasks assigned to this user (regardless of creator)
+        try:
+            user_dist = await db.assignments.find_one({"userId": userId})
+            if user_dist and user_dist.get("tasks"):
+                assigned_ids = []
+                for t in user_dist.get("tasks", []):
+                    tid = t.get("taskId")
+                    if tid and ObjectId.is_valid(tid):
+                        assigned_ids.append(ObjectId(tid))
+                
+                if assigned_ids:
+                    or_conditions.append({"_id": {"$in": assigned_ids}})
+        except Exception as e:
+            print(f"Error fetching assignments in project details: {e}")
+            
+        task_query["$or"] = or_conditions
     
     # Add sorting by updatedAt descending (newest first)
     tasks_cursor = db.tasks.find(task_query).sort([("updatedAt", -1)])
@@ -102,7 +128,7 @@ async def get_project_details(request: Request, project_id: str, userId: Optiona
             "isEnabled": task.get("isEnabled", False)
         }
         tasks_with_status.append(task_with_status)
-    
+
     project_with_tasks = {
         **project_data,
         "tasks": tasks_with_status
