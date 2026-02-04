@@ -1,5 +1,3 @@
-# tasks.py
-
 from fastapi import APIRouter, Request, Body, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -56,7 +54,14 @@ async def get_all_tasks(request: Request, project_id: str = None, userId: str = 
         ]
     
     cursor = db.tasks.find(query)
-    return [serialize(doc) async for doc in cursor]
+    tasks = []
+    async for doc in cursor:
+        task = serialize(doc)
+        # Ensure isEnabled is present with default value
+        if "isEnabled" not in task:
+            task["isEnabled"] = False
+        tasks.append(task)
+    return tasks
 
 
 @router.post("/", status_code=201)
@@ -68,8 +73,93 @@ async def create_task(request: Request, task: Task = Body(...)):
     # Ensure updatedAt is set to current time
     task_dict["updatedAt"] = datetime.now()
     
+    # Handle new fields
+    task_dict["day"] = task.day
+    task_dict["taskType"] = task.taskType
+    
+    # Ensure isEnabled has a default value if not provided
+    if "isEnabled" not in task_dict or task_dict["isEnabled"] is None:
+        task_dict["isEnabled"] = False
+    
     result = await db.tasks.insert_one(task_dict)
     created_task = await db.tasks.find_one({"_id": result.inserted_id})
+    task_id_str = str(result.inserted_id)
+
+    # --- Auto-assign logic based on Preferences ---
+    # Find all users who want this skillType or "All"
+    skill_type = task_dict.get("skillType")
+    auto_assign = task_dict.get("autoAssign", True)
+    
+    if skill_type and auto_assign:
+        print(f"🔄 Checking preferences for auto-assigning task {task_id_str} ({skill_type})")
+        
+        # Query for users with preferences containing "All" or the specific skillType
+        matching_prefs_cursor = db.preferences.find({
+            "preferences": {"$in": ["All", skill_type]}
+        })
+        
+        assigned_count = 0
+        
+        async for pref_doc in matching_prefs_cursor:
+            user_id = pref_doc["userId"]
+            
+            # --- Duplicate Prevention Check ---
+            # Check if user already has this specific task ID OR a task with identical content
+            assignment = await db.assignments.find_one({"userId": user_id})
+            if assignment and assignment.get("tasks"):
+                assigned_task_ids = [ObjectId(t["taskId"]) for t in assignment.get("tasks") if ObjectId.is_valid(t.get("taskId"))]
+                
+                # Check for exact taskId match first (fast)
+                if task_id_str in [str(tid) for tid in assigned_task_ids]:
+                    print(f"⏭️ Skipping user {user_id} - Task ID {task_id_str} already assigned")
+                    continue
+                    
+                # Check for content match (Title, Description, SkillType)
+                assigned_details = await db.tasks.find({"_id": {"$in": assigned_task_ids}}).to_list(length=None)
+                is_content_duplicate = False
+                for existing_task in assigned_details:
+                    if (existing_task.get("title") == task_dict.get("title") and 
+                        existing_task.get("description") == task_dict.get("description") and 
+                        existing_task.get("skillType") == task_dict.get("skillType")):
+                        is_content_duplicate = True
+                        break
+                
+                if is_content_duplicate:
+                    print(f"⏭️ Skipping user {user_id} - task with same content already assigned")
+                    continue
+            # ----------------------------------
+            
+            # Create the task assignment object
+            new_assignment_data = TaskAssignment(
+                taskId=task_id_str,
+                assignedBy="admin", # System auto-assign
+                sequenceId=None, # No specific sequence
+                taskStatus="active", # Mark as active immediately as per requirement
+                expectedCompletionDate=None
+            ).model_dump()
+            
+            # Ensure the task itself is enabled if assigned by admin
+            await db.tasks.update_one(
+                {"_id": ObjectId(task_id_str)},
+                {"$set": {"isEnabled": True}}
+            )
+            
+            # Upsert into assignments collection
+            await db.assignments.update_one(
+                {"userId": user_id},
+                {
+                    "$push": {"tasks": new_assignment_data},
+                    "$setOnInsert": {
+                        "userId": user_id, 
+                        "id": str(ObjectId()) 
+                    } 
+                },
+                upsert=True
+            )
+            assigned_count += 1
+            
+        print(f"✅ Auto-assigned task {task_id_str} to {assigned_count} users")
+
     return serialize(created_task)
 
 
@@ -80,7 +170,11 @@ async def get_task(request: Request, task_id: str):
     task = await db.tasks.find_one({"_id": ObjectId(task_id)})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return serialize(task)
+    task = serialize(task)
+    # Ensure isEnabled is present
+    if "isEnabled" not in task:
+        task["isEnabled"] = False
+    return task
 
 
 @router.put("/{task_id}")
@@ -101,7 +195,11 @@ async def update_task(request: Request, task_id: str, task_update: TaskUpdate = 
         raise HTTPException(status_code=404, detail="Task not found")
     
     updated_task = await db.tasks.find_one({"_id": ObjectId(task_id)})
-    return serialize(updated_task)
+    task = serialize(updated_task)
+    # Ensure isEnabled is present
+    if "isEnabled" not in task:
+        task["isEnabled"] = False
+    return task
 
 
 @router.delete("/{task_id}", status_code=204)
@@ -138,7 +236,11 @@ async def update_user_created_task(request: Request, task_id: str, user_id: str,
              raise HTTPException(status_code=403, detail="User not authorized to update this task")
     
     updated_task = await db.tasks.find_one({"_id": ObjectId(task_id)})
-    return serialize(updated_task)
+    task = serialize(updated_task)
+    # Ensure isEnabled is present
+    if "isEnabled" not in task:
+        task["isEnabled"] = False
+    return task
 
 
 @router.delete("/{task_id}/user/{user_id}", status_code=204)
@@ -166,50 +268,63 @@ async def delete_user_created_task(request: Request, task_id: str, user_id: str)
 async def link_task_to_user(request: Request, link: UserTaskLink = Body(...)):
     """
     Link a task to a user by adding it to their assignments.
-    Creates assignment document if it doesn't exist.
+    Includes content-based deduplication.
     """
     db = request.app.state.db
     
     # Verify task exists
-    task = await db.tasks.find_one({"_id": ObjectId(link.taskId)})
-    if not task:
+    task_doc = await db.tasks.find_one({"_id": ObjectId(link.taskId)})
+    if not task_doc:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    # Check if user already has this task assigned
+    # Check if user already has this task assigned OR a content duplicate
     assignment = await db.assignments.find_one({"userId": link.userId})
     
-    if assignment:
-        # Check for duplicate
-        task_ids = [str(t.get("taskId")) for t in assignment.get("tasks", [])]
-        if link.taskId in task_ids:
-            raise HTTPException(status_code=400, detail="Task already assigned to user")
+    if assignment and assignment.get("tasks"):
+        assigned_task_ids = [ObjectId(t["taskId"]) for t in assignment.get("tasks") if ObjectId.is_valid(t.get("taskId"))]
         
-        # Add task to existing assignment
-        new_task = TaskAssignment(
-            taskId=link.taskId,
-            assignedBy=link.assignedBy,
-            sequenceId=link.sequenceId,
-            expectedCompletionDate=link.expectedCompletionDate
+        # 1. Exact taskId match
+        if link.taskId in [str(tid) for tid in assigned_task_ids]:
+             return {"status": "success", "message": "Task already assigned (ID match)"}
+             
+        # 2. Content match
+        assigned_details = await db.tasks.find({"_id": {"$in": assigned_task_ids}}).to_list(length=None)
+        for existing_task in assigned_details:
+            if (existing_task.get("title") == task_doc.get("title") and 
+                existing_task.get("description") == task_doc.get("description") and 
+                existing_task.get("skillType") == task_doc.get("skillType")):
+                return {"status": "success", "message": "Task already assigned (content match)"}
+
+    # Set status to active if assigned by admin
+    is_admin_assignment = link.assignedBy == "admin" or link.userId == "6928870c5b168f52cf8bd77a"
+    task_status = "active" if is_admin_assignment else "pending"
+    
+    # If admin assigns, ensure the task is enabled globally
+    if is_admin_assignment:
+        await db.tasks.update_one(
+            {"_id": ObjectId(link.taskId)},
+            {"$set": {"isEnabled": True}}
         )
-        
-        await db.assignments.update_one(
-            {"userId": link.userId},
-            {"$push": {"tasks": new_task.model_dump()}}
-        )
-    else:
-        # Create new assignment with this task
-        new_assignment = Assignment(
-            userId=link.userId,
-            tasks=[
-                TaskAssignment(
-                    taskId=link.taskId,
-                    assignedBy=link.assignedBy,
-                    sequenceId=link.sequenceId,
-                    expectedCompletionDate=link.expectedCompletionDate
-                )
-            ]
-        )
-        await db.assignments.insert_one(new_assignment.model_dump(exclude={"id"}))
+
+    new_task_assignment = TaskAssignment(
+        taskId=link.taskId,
+        assignedBy=link.assignedBy,
+        sequenceId=link.sequenceId,
+        taskStatus=task_status,
+        expectedCompletionDate=link.expectedCompletionDate
+    ).model_dump()
+
+    await db.assignments.update_one(
+        {"userId": link.userId},
+        {
+            "$push": {"tasks": new_task_assignment},
+            "$setOnInsert": {
+                "userId": link.userId,
+                "id": str(ObjectId())
+            }
+        },
+        upsert=True
+    )
     
     return {"status": "success", "message": "Task assigned to user"}
 
@@ -268,7 +383,10 @@ async def get_user_tasks(request: Request, user_id: str):
                 expectedCompletionDate=task_assignment.get("expectedCompletionDate"),
                 completionDate=task_assignment.get("completionDate"),
                 comments=task_assignment.get("comments", []),
-                createdBy=task.get("createdBy")
+                createdBy=task.get("createdBy"),
+                isEnabled=task.get("isEnabled", False),
+                day=task.get("day"),
+                taskType=task.get("taskType")
             )
             task_responses.append(task_response)
         
@@ -282,6 +400,76 @@ async def get_user_tasks(request: Request, user_id: str):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching user tasks: {str(e)}")
+
+
+
+@router.delete("/user-tasks/bulk-clear-all-users", status_code=200)
+async def bulk_clear_all_users_tasks(request: Request):
+    """
+    Clear all assigned tasks for ALL users in the system.
+    Sets the tasks array to empty for every assignment document.
+    """
+    try:
+        db = request.app.state.db
+        result = await db.assignments.update_many(
+            {},
+            {"$set": {"tasks": []}}
+        )
+        return {
+            "status": "success",
+            "message": f"Successfully cleared tasks for {result.modified_count} users",
+            "modifiedCount": result.modified_count
+        }
+    except Exception as e:
+        print(f"❌ Error in bulk_clear_all_users_tasks: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear all tasks: {str(e)}")
+
+
+@router.delete("/user-tasks/{user_id}/clear", status_code=200)
+async def clear_all_user_tasks(request: Request, user_id: str):
+    """
+    Clear all assigned tasks for a specific user.
+    Sets the tasks array to empty while preserving the assignment document.
+    """
+    try:
+        db = request.app.state.db
+        
+        # Check if assignment exists
+        assignment = await db.assignments.find_one({"userId": user_id})
+        
+        if not assignment:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No assignment document found for user {user_id}"
+            )
+        
+        # Clear all tasks but keep the assignment document
+        result = await db.assignments.update_one(
+            {"userId": user_id},
+            {"$set": {"tasks": []}}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Failed to update assignment for user {user_id}"
+            )
+        
+        print(f"✅ Cleared all tasks for user {user_id}")
+        
+        return {
+            "status": "success",
+            "message": f"Successfully cleared all assigned tasks for user {user_id}",
+            "userId": user_id
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error clearing assigned tasks: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to clear assigned tasks: {str(e)}")
 
 
 @router.delete("/user-tasks/{user_id}/{task_id}", status_code=200)
@@ -344,10 +532,11 @@ async def unassign_user_from_task(request: Request, user_id: str, task_id: str):
 @router.put("/user-tasks/{user_id}/{task_id}/complete", status_code=200)
 async def mark_task_complete(request: Request, user_id: str, task_id: str):
     """
-    Mark a task as completed for a user.
+    Mark a task as completed for a user and trigger an agent proactive message.
     """
     db = request.app.state.db
     
+    # 1. Update task status
     result = await db.assignments.update_one(
         {"userId": user_id, "tasks.taskId": task_id},
         {
@@ -361,7 +550,37 @@ async def mark_task_complete(request: Request, user_id: str, task_id: str):
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Task assignment not found")
     
-    return {"status": "success", "message": "Task marked as complete"}
+    # 2. Get task details for the message
+    task = await db.tasks.find_one({"_id": ObjectId(task_id)})
+    if task:
+        task_name = task.get("name") or task.get("title") or "the task"
+    else:
+        task_name = "the task"
+    
+    # 3. Get agent name
+    agent_doc = await db.agents.find_one({"userId": user_id})
+    agent_name = agent_doc.get("agentName", "Study Buddy") if agent_doc else "Study Buddy"
+    
+    # 4. Insert proactive message into chats
+    # Check if a completion message was already sent recently to avoid duplicates if user toggles
+    proactive_message = f"Great! You've completed '{task_name}'. Shall I assign the next task, or would you like to shift your learning preferences?"
+    
+    chat_doc = {
+        "userId": user_id,
+        "userType": "agent",
+        "message": proactive_message,
+        "timestamp": datetime.now()
+    }
+    await db.chats.insert_one(chat_doc)
+    
+    print(f"🤖 [AGENT] Proactive message added for user {user_id} after completing {task_name}")
+    
+    
+    return {
+        "status": "success", 
+        "message": "Task marked as complete",
+        "agentResponse": proactive_message
+    }
 
 
 @router.put("/user-tasks/{user_id}/{task_id}/comment", status_code=200)
@@ -385,54 +604,6 @@ async def add_comment_to_task(
         raise HTTPException(status_code=404, detail="Task assignment not found")
     
     return {"status": "success", "message": "Comment added"}
-
-
-@router.delete("/user-tasks/{user_id}/clear", status_code=200)
-async def clear_all_user_tasks(request: Request, user_id: str):
-    """
-    Clear all assigned tasks for a specific user.
-    Sets the tasks array to empty while preserving the assignment document.
-    """
-    try:
-        db = request.app.state.db
-        
-        # Check if assignment exists
-        assignment = await db.assignments.find_one({"userId": user_id})
-        
-        if not assignment:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"No assignment document found for user {user_id}"
-            )
-        
-        # Clear all tasks but keep the assignment document
-        result = await db.assignments.update_one(
-            {"userId": user_id},
-            {"$set": {"tasks": []}}
-        )
-        
-        if result.matched_count == 0:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Failed to update assignment for user {user_id}"
-            )
-        
-        print(f"✅ Cleared all tasks for user {user_id}")
-        
-        return {
-            "status": "success",
-            "message": f"Successfully cleared all assigned tasks for user {user_id}",
-            "userId": user_id
-        }
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ Error clearing assigned tasks: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to clear assigned tasks: {str(e)}")
-    
 
 @router.put("/user-tasks/{user_id}/{task_id}/active", status_code=200)
 async def mark_task_active(request: Request, user_id: str, task_id: str):
@@ -546,6 +717,10 @@ async def bulk_add_tasks_to_project(request: Request, bulk_req: BulkLoadTasksReq
     for task in tasks:
         task_data = task.model_dump()
         task_data["project_id"] = project_id
+        task_data["updatedAt"] = datetime.now()
+        # Ensure isEnabled has default value
+        if "isEnabled" not in task_data or task_data["isEnabled"] is None:
+            task_data["isEnabled"] = False
         new_tasks.append(task_data)
         
     if not new_tasks:
@@ -702,7 +877,10 @@ async def trigger_email(request: Request, req: TriggerEmailRequest = Body(...)):
                 name = task_doc.get("name") or task_doc.get("title") or "Unnamed Task"
                 active_task_names.append(name)
     
-    agent_message3 = ", ".join(active_task_names) if active_task_names else "No active tasks"
+    if active_task_names:
+        agent_message3 = "<br>".join([f"{i+1}. {name}" for i, name in enumerate(active_task_names)])
+    else:
+        agent_message3 = "Oops! Looks like there are no tasks assigned to you. Please connect with Vijender and get yourself some tasks assigned to you at the earliest."
     
     # 4. Prepare Payload
     current_date = get_ordinal_date_string(datetime.now())
@@ -730,11 +908,130 @@ async def trigger_email(request: Request, req: TriggerEmailRequest = Body(...)):
         if response.status_code >= 200 and response.status_code < 300:
             return {"status": "success", "message": "Email triggered successfully", "external_response": response.json()}
         else:
-            print(f"❌ Email API failed: {response.status_code} - {response.text}")
-            # Even if external fails, user prompt said "When it returns sucess, then return success."
-            # But usually we should warn. I will return 500 if external fails.
-            raise HTTPException(status_code=502, detail=f"External email service failed: {response.text}")
+            print(f"❌ External email API returned error: {response.status_code} - {response.text}")
+            raise HTTPException(status_code=response.status_code, detail=f"Email service error: {response.text}")
             
     except httpx.RequestError as e:
         print(f"❌ Network error calling email API: {str(e)}")
         raise HTTPException(status_code=503, detail=f"Failed to connect to email service: {str(e)}")
+
+
+@router.post("/broadcast-task", status_code=200)
+async def broadcast_task(request: Request, body: Dict[str, Any] = Body(...)):
+    """
+    Broadcast a task to ALL users in the system, bypassing skill preferences.
+    """
+    db = request.app.state.db
+    task_id = body.get("taskId")
+    admin_id = body.get("adminId") # For verification
+    
+    if admin_id != "6928870c5b168f52cf8bd77a":
+        raise HTTPException(status_code=403, detail="Unauthorized broadcast attempt")
+
+    task_doc = await db.tasks.find_one({"_id": ObjectId(task_id)})
+    if not task_doc:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Mark the task as enabled globally
+    await db.tasks.update_one({"_id": ObjectId(task_id)}, {"$set": {"isEnabled": True}})
+
+    users_cursor = db.users.find({}, {"_id": 1})
+    assigned_count = 0
+    
+    async for user in users_cursor:
+        user_id = str(user["_id"])
+        
+        # Check for duplicate
+        assignment = await db.assignments.find_one({"userId": user_id})
+        is_duplicate = False
+        if assignment and assignment.get("tasks"):
+            for t in assignment.get("tasks"):
+                if t.get("taskId") == task_id:
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                 # Content check for broadcast too
+                 task_ids = [ObjectId(t["taskId"]) for t in assignment["tasks"] if ObjectId.is_valid(t["taskId"])]
+                 assigned_details = await db.tasks.find({"_id": {"$in": task_ids}}).to_list(length=None)
+                 for existing_task in assigned_details:
+                     if (existing_task.get("title") == task_doc.get("title") and 
+                         existing_task.get("description") == task_doc.get("description")):
+                         is_duplicate = True
+                         break
+
+        if is_duplicate:
+            continue
+
+        new_task_assignment = TaskAssignment(
+            taskId=task_id,
+            assignedBy="admin",
+            taskStatus="active"
+        ).model_dump()
+
+        await db.assignments.update_one(
+            {"userId": user_id},
+            {
+                "$push": {"tasks": new_task_assignment},
+                "$setOnInsert": {"userId": user_id, "id": str(ObjectId())}
+            },
+            upsert=True
+        )
+        assigned_count += 1
+
+    return {"status": "success", "message": f"Task broadcasted to {assigned_count} users"}
+
+
+@router.post("/sync-admin-tasks/{user_id}", status_code=200)
+async def sync_admin_tasks(request: Request, user_id: str):
+    """
+    Assign all existing admin-created tasks to a new user.
+    Skips tasks already assigned or with matching content.
+    """
+    db = request.app.state.db
+    
+    # Get all admin-created tasks
+    admin_tasks_cursor = db.tasks.find({"createdBy": "admin"})
+    admin_tasks = await admin_tasks_cursor.to_list(length=None)
+    
+    # Get user's current assignments
+    assignment = await db.assignments.find_one({"userId": user_id})
+    user_task_ids = []
+    user_task_contents = []
+    
+    if assignment and assignment.get("tasks"):
+        user_task_ids = [t.get("taskId") for t in assignment.get("tasks")]
+        task_ids = [ObjectId(tid) for tid in user_task_ids if ObjectId.is_valid(tid)]
+        assigned_details = await db.tasks.find({"_id": {"$in": task_ids}}).to_list(length=None)
+        user_task_contents = [(t.get("title"), t.get("description")) for t in assigned_details]
+
+    synced_count = 0
+    for task in admin_tasks:
+        task_id_str = str(task["_id"])
+        
+        # Skip if ID match
+        if task_id_str in user_task_ids:
+            continue
+            
+        # Skip if content match
+        if (task.get("title"), task.get("description")) in user_task_contents:
+            continue
+
+        # Assign task
+        new_task_assignment = TaskAssignment(
+            taskId=task_id_str,
+            assignedBy="admin",
+            taskStatus="active"
+        ).model_dump()
+
+        await db.assignments.update_one(
+            {"userId": user_id},
+            {
+                "$push": {"tasks": new_task_assignment},
+                "$setOnInsert": {"userId": user_id, "id": str(ObjectId())}
+            },
+            upsert=True
+        )
+        synced_count += 1
+        
+    return {"status": "success", "message": f"Synced {synced_count} admin tasks to user"}

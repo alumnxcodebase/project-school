@@ -21,6 +21,8 @@ async def classify_user_intent(llm, user_message: str, prompt_loader) -> str:
         # Validate intent
         if "task_assignment" in intent:
             intent = "task_assignment"
+        elif "buddy_response" in intent:
+            intent = "buddy_response"
         elif "general_conversation" in intent:
             intent = "general_conversation"
         else:

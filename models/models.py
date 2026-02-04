@@ -39,8 +39,12 @@ class Task(BaseModel):
     description: Optional[str] = None
     estimatedTime: float
     skillType: str
+    day: Optional[str] = None
+    taskType: Optional[Literal["Theory", "Practical"]] = None
     createdBy: Optional[str] = None
     updatedAt: Optional[datetime] = None
+    isEnabled: bool = False
+    autoAssign: bool = True  # Defaults to True for backward compatibility
 
 class TaskAssignment(BaseModel):
     """Individual task assignment details"""
@@ -77,6 +81,9 @@ class TaskResponse(BaseModel):
     completionDate: Optional[str] = None
     comments: List[Comment] = Field(default_factory=list)
     createdBy: Optional[str] = None
+    isEnabled: bool = False
+    day: Optional[str] = None
+    taskType: Optional[Literal["Theory", "Practical"]] = None
 
 class ProjectWithTasks(BaseModel):
     """Response model for project details with associated tasks"""
@@ -94,6 +101,9 @@ class BulkTaskItem(BaseModel):
     description: Optional[str] = None
     estimatedTime: float
     skillType: str
+    isEnabled: bool = False
+    day: Optional[str] = None
+    taskType: Optional[Literal["Theory", "Practical"]] = None
 
 class BulkLoadTasksRequest(BaseModel):
     projectId: str
@@ -110,12 +120,21 @@ class Goal(BaseModel):
     userId: str
     goals: str
 
+class UserPreferences(BaseModel):
+    """Model for user skill preferences"""
+    userId: str
+    preferences: List[str]  # e.g., ["Frontend", "AI"] or ["All"]
+    updated_at: datetime = Field(default_factory=datetime.now)
+
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     estimatedTime: Optional[float] = None
     skillType: Optional[str] = None
     priority: Optional[str] = None
+    isEnabled: Optional[bool] = None
+    day: Optional[str] = None
+    taskType: Optional[Literal["Theory", "Practical"]] = None
 
 class UserTaskLink(BaseModel):
     userId: str
@@ -191,7 +210,10 @@ class TaskWithAssignment(BaseModel):
     description: Optional[str] = None
     estimatedTime: float
     skillType: str
+    day: Optional[str] = None
+    taskType: Optional[Literal["Theory", "Practical"]] = None
     isAssigned: bool = False
+    isEnabled: bool = False
 
 class GetProjectTasksRequest(BaseModel):
     """Request model for getting project tasks with assignment status"""
@@ -218,10 +240,13 @@ class TaskWithStatus(BaseModel):
     description: Optional[str] = None
     estimatedTime: float
     skillType: str
+    day: Optional[str] = None
+    taskType: Optional[Literal["Theory", "Practical"]] = None
     createdBy: Optional[str] = None
     updatedAt: Optional[datetime] = None
     taskStatus: Optional[Literal["pending", "active", "completed"]] = None
     isAssigned: bool = False
+    isEnabled: bool = False
 
 class ProjectWithTasksAndStatus(BaseModel):
     """Response model for project details with tasks and their status"""

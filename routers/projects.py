@@ -69,17 +69,43 @@ async def get_project_details(request: Request, project_id: str, userId: Optiona
     
     project_data = serialize(project)
     
+
+    
+    
     # Build query to get tasks created by admin or the specified user
     task_query = {"project_id": project_id}
-    if userId:
-        task_query["$or"] = [
+    
+    # Check if user is Admin
+    ADMIN_ID = "6928870c5b168f52cf8bd77a"
+    is_admin = userId == ADMIN_ID
+    
+    if userId and not is_admin:
+        # Standard visibility conditions for NON-ADMIN users
+        or_conditions = [
             {"createdBy": None},
             {"createdBy": "admin"},
-            {"createdBy": "6928870c5b168f52cf8bd77a"},
+            {"createdBy": ADMIN_ID},
             {"createdBy": userId}
         ]
+        
+        # Also include tasks assigned to this user (regardless of creator)
+        try:
+            user_dist = await db.assignments.find_one({"userId": userId})
+            if user_dist and user_dist.get("tasks"):
+                assigned_ids = []
+                for t in user_dist.get("tasks", []):
+                    tid = t.get("taskId")
+                    if tid and ObjectId.is_valid(tid):
+                        assigned_ids.append(ObjectId(tid))
+                
+                if assigned_ids:
+                    or_conditions.append({"_id": {"$in": assigned_ids}})
+        except Exception as e:
+            print(f"Error fetching assignments in project details: {e}")
+            
+        task_query["$or"] = or_conditions
     
-    # ONLY CHANGE: Add sorting by updatedAt descending (newest first)
+    # Add sorting by updatedAt descending (newest first)
     tasks_cursor = db.tasks.find(task_query).sort([("updatedAt", -1)])
     tasks = [serialize(task) async for task in tasks_cursor]
     
@@ -91,17 +117,18 @@ async def get_project_details(request: Request, project_id: str, userId: Optiona
             for task_assignment in assignment.get("tasks", []):
                 task_status_map[task_assignment.get("taskId")] = task_assignment.get("taskStatus")
     
-    # Add taskStatus to each task
+    # Add taskStatus and isEnabled to each task
     tasks_with_status = []
     for task in tasks:
         task_id = task.get("id")
         task_with_status = {
             **task,
             "taskStatus": task_status_map.get(task_id),
-            "isAssigned": task_id in task_status_map
+            "isAssigned": task_id in task_status_map,
+            "isEnabled": task.get("isEnabled", False)
         }
         tasks_with_status.append(task_with_status)
-    
+
     project_with_tasks = {
         **project_data,
         "tasks": tasks_with_status
@@ -151,7 +178,7 @@ async def get_project_tasks_assigned_to_user(
             {"createdBy": req.userId}
         ]
     }
-    # ONLY CHANGE: Add sorting by updatedAt descending (newest first)
+    # Add sorting by updatedAt descending (newest first)
     tasks_cursor = db.tasks.find(task_query).sort([("updatedAt", -1)])
     tasks = await tasks_cursor.to_list(length=None)
     
@@ -162,7 +189,7 @@ async def get_project_tasks_assigned_to_user(
     if assignment and assignment.get("tasks"):
         assigned_task_ids = {task.get("taskId") for task in assignment.get("tasks", [])}
     
-    # Build response with isAssigned field
+    # Build response with isAssigned and isEnabled fields
     tasks_with_assignment = []
     for task in tasks:
         task_id = str(task["_id"])
@@ -173,7 +200,8 @@ async def get_project_tasks_assigned_to_user(
             description=task.get("description"),
             estimatedTime=task.get("estimatedTime", 0),
             skillType=task.get("skillType", "General"),
-            isAssigned=(task_id in assigned_task_ids)
+            isAssigned=(task_id in assigned_task_ids),
+            isEnabled=task.get("isEnabled", False)
         )
         tasks_with_assignment.append(task_with_assignment)
     

@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)
 
 
 class Config:
@@ -10,7 +10,7 @@ class Config:
     
     # LLM Configuration
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-    LLM_MODEL = "gemini-2.0-flash-exp"
+    LLM_MODEL = os.getenv("LLM_MODEL", "models/gemini-2.0-flash")
     LLM_TEMPERATURE = 0.0
     
     # Agent Configuration

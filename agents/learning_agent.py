@@ -4,7 +4,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
 from langsmith import traceable
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import re
 
@@ -16,6 +16,7 @@ from .utils.task_validator import validate_and_enrich_tasks, format_tasks_messag
 from .utils.tools import create_agent_tools
 from .utils.agent_name_handler import handle_agent_name_update
 from .utils.callback_handler import handle_button_callback, is_button_callback
+from .utils.study_buddy_helper import get_user_learning_state, update_buddy_status
 
 
 def get_learning_agent(db):
@@ -58,7 +59,9 @@ User's latest message: "{user_message}"
 If the user is providing a name (could be a single word, multiple words, or a creative name), respond with:
 {{"is_name": true, "name": "<extracted_name>"}}
 
-If the user is asking a question or having a general conversation (not providing a name), respond with:
+IMPORTANT: Greetings like "hi", "hello", "hey", "sup", "yo" are NOT names. General questions are NOT names.
+
+If the user is asking a question, greeting you, or having a general conversation (not providing a name), respond with:
 {{"is_name": false, "name": ""}}
 
 Respond ONLY with the JSON object, nothing else."""
@@ -269,6 +272,9 @@ def extract_response_type_and_buttons(response_text: str) -> tuple:
     else:
         print(f"ℹ️ No response type tag found in agent response")
     
+    # Global cleanup for any other tags (SCENARIO, NEXT_CONTACT, DAYS, RESPONSE_TYPE, etc.)
+    cleaned_response = re.sub(r'\[(?:SCENARIO|NEXT_CONTACT|DAYS|RESPONSE_TYPE):.*?\]', '', cleaned_response).strip()
+    
     return cleaned_response, buttons
 
 
@@ -352,6 +358,51 @@ async def run_learning_agent(
             }
         
         # ============================================================
+        # STEP 1.2: Check for Proactive Study Buddy Nudge
+        # ============================================================
+        learning_state = await get_user_learning_state(db, user_id)
+        
+        # Get agent name for personalized responses
+        agent_doc = await db.agents.find_one({"userId": user_id})
+        agent_name = agent_doc.get("agentName", Config.DEFAULT_AGENT_NAME) if agent_doc else Config.DEFAULT_AGENT_NAME
+        
+        # 🚨 FIX: If the stored agent name is "Frontend" (accidental assignment), fallback to "Study Buddy"
+        if agent_name == "Frontend":
+            agent_name = Config.DEFAULT_AGENT_NAME
+
+        if not user_message:
+            # Check if user is in "postponed" status and if time has passed
+            current_time = datetime.now()
+            next_contact = learning_state.get("next_contact_date")
+            buddy_status = learning_state.get("buddy_status", "active")
+
+            if buddy_status == "postponed" and next_contact and next_contact > current_time:
+                print(f"🤫 Skipping proactive nudge: User is postponed until {next_contact}")
+                return {"message": "", "status": "skip", "skip_save": True} # Return skip status
+
+            # Case 1: Preferences set but no active tasks
+            if not learning_state["has_active_tasks"] and learning_state["has_preferences"]:
+                print("💡 Proactive Nudge: User has preferences but 0 active tasks")
+                prefs_list = ", ".join(learning_state["preferences"])
+                nudge_message = f"Hello! I am {agent_name}. Here are your preferences: {prefs_list}. Looks like there are no active task in your active task tab. What would you like to focus on today?"
+                
+                # Let the router handle saving this message
+                return {"message": nudge_message, "status": "success", "skip_save": False}
+            
+            # Case 2: Active tasks already exist
+            elif learning_state["has_active_tasks"]:
+                print("💡 Proactive Reminder: User has active tasks")
+                nudge_message = f"Hello! I am {agent_name}. I see there are active tasks in your bucket, please complete it to move forward with your learning journey!"
+                
+                # Let the router handle saving this message
+                return {"message": nudge_message, "status": "success", "skip_save": False}
+            
+            # Case 3: No preferences and no tasks
+            else:
+                nudge_message = f"Hello! I am {agent_name}. I see your learning dashboard is empty. Would you like to tell me about your career goals so I can suggest some skills to focus on?"
+                return {"message": nudge_message, "status": "success", "skip_save": False}
+        
+        # ============================================================
         # STEP 1.5: Handle Button Callbacks FIRST (sfs, ps, js)
         # ============================================================
         if user_message and is_button_callback(user_message):
@@ -414,9 +465,13 @@ async def run_learning_agent(
         # ============================================================
         # STEP 4: Check if user is providing a name
         # ============================================================
-        name_check = await check_if_name_response(llm, user_message, chat_history)
+        name_check = {'is_name': False, 'extracted_name': ''}
         
-        if name_check['is_name']:
+        # Only check for name if user actually sent a message
+        if user_message and len(user_message.strip()) > 1:
+            name_check = await check_if_name_response(llm, user_message, chat_history)
+        
+        if name_check['is_name'] and name_check['extracted_name']:
             agent_name = name_check['extracted_name']
             print(f"🎯 Detected name response: {agent_name}")
             
@@ -486,13 +541,7 @@ async def run_learning_agent(
         # Initialize prompt loader
         prompt_loader = PromptLoader(Config.PROMPTS_DIR)
 
-        # Get agent name for personalized responses
-        agent_doc = await db.agents.find_one({"userId": user_id})
-        agent_name = (
-            agent_doc.get("agentName", Config.DEFAULT_AGENT_NAME) 
-            if agent_doc 
-            else Config.DEFAULT_AGENT_NAME
-        )
+        # agent_name is already defined above in STEP 1.2
         print(f"🤖 Agent name: {agent_name}")
 
         # Create tools
@@ -500,9 +549,20 @@ async def run_learning_agent(
 
         # Classify user intent
         is_task_assignment_mode = False
+        intent = "general_conversation" # Default intent
+        
         if user_message:
             intent = await classify_user_intent(llm, user_message, prompt_loader)
             is_task_assignment_mode = intent == "task_assignment"
+        else:
+            # Fallback for null message when no proactive nudge was triggered
+            print("ℹ️ Message is null and no nudge triggered. Using default greeting.")
+            fallback_message = f"Hello! I am {agent_name}, your learning coach. I see there are no active tasks or specific suggestions right now. Would you like to discuss your career goals or set new preferences?"
+            return {
+                "message": fallback_message,
+                "status": "success",
+                "skip_save": False
+            }
 
         print(f"🎯 Mode: {'TASK ASSIGNMENT' if is_task_assignment_mode else 'GENERAL CONVERSATION'}\n")
 
@@ -510,6 +570,28 @@ async def run_learning_agent(
         if is_task_assignment_mode:
             system_prompt = prompt_loader.format("task_assignment_system", agent_name=agent_name)
             user_prompt = prompt_loader.format("task_assignment_user", user_id=user_id)
+        elif intent == "buddy_response":
+            # Fetch context for buddy response
+            learning_state = await get_user_learning_state(db, user_id)
+            
+            # Format last 5 messages for context
+            context_messages = chat_history[-6:-1] if len(chat_history) > 1 else []
+            history_transcript = "\n".join([
+                f"{'User' if m.get('userType') == 'user' else 'Agent'}: {m.get('message')}" 
+                for m in context_messages
+            ])
+            
+            system_prompt = prompt_loader.format(
+                "buddy_response_system", 
+                agent_name=agent_name,
+                preferences=", ".join(learning_state["preferences"]),
+                active_tasks_count=len(learning_state["active_tasks"]),
+                completed_tasks_count=len(learning_state["completed_tasks"]),
+                current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                next_contact_date=learning_state.get("next_contact_date").strftime("%Y-%m-%d %H:%M:%S") if learning_state.get("next_contact_date") else "None"
+            )
+            
+            user_prompt = f"User ID: {user_id}\n\nRecent Conversation Context:\n{history_transcript}\n\nUser is responding: {user_message}"
         else:
             system_prompt = prompt_loader.format("general_conversation_system", agent_name=agent_name)
             
@@ -544,6 +626,10 @@ async def run_learning_agent(
         print("🔄 Running agent...\n")
 
         # Run the agent
+        # We wrap the prompts in a way that encourages tool use
+        print(f"--- SYSTEM PROMPT ---\n{system_prompt}\n")
+        print(f"--- USER PROMPT ---\n{user_prompt}\n")
+        
         result = await agent.ainvoke(
             {
                 "messages": [
@@ -591,22 +677,81 @@ async def run_learning_agent(
                 "message": message_text,
                 "status": "success",
                 "tasks": enriched_tasks,
+                "show_task_list": True, # Explicitly show the selection UI
                 "messages": result["messages"],
             }
             
             return response_obj
         else:
-            # ============================================================
-            # EXTRACT BUTTONS BASED ON RESPONSE TYPE
-            # ============================================================
-            cleaned_response, buttons = extract_response_type_and_buttons(final_response)
-            
-            return {
-                "message": cleaned_response,
-                "buttons": buttons,
-                "status": "success",
-                "messages": result["messages"],
-            }
+            # ENHANCED TASK REFRESH TRIGGER
+            # Check if any tool was called during this turn that might have changed tasks
+            tool_called = False
+            for m in result["messages"]:
+                if hasattr(m, 'tool_calls') and m.tool_calls:
+                    for tc in m.tool_calls:
+                        if tc.get('name') in ['assign_task_to_user_tool', 'get_first_task_by_skill']:
+                            tool_called = True
+                            break
+                if tool_called: break
+
+            if intent == "buddy_response":
+                print("🔄 Post-processing Buddy Response for state updates")
+                buttons = []
+                tasks = [] # Initialize tasks list
+                
+                if "[SCENARIO: BUSY]" in final_response:
+                    await update_buddy_status(db, user_id, "busy")
+                elif "[SCENARIO: POSTPONE]" in final_response:
+                    # Try to extract time or days from LLM response
+                    time_match = re.search(r'\[NEXT_CONTACT: (.*?)\]', final_response)
+                    if time_match:
+                        try:
+                            from dateutil import parser
+                            next_contact = parser.parse(time_match.group(1))
+                            print(f"🕒 Extracted specific next contact: {next_contact}")
+                        except:
+                            next_contact = datetime.now() + timedelta(days=3)
+                    else:
+                        days_match = re.search(r'\[DAYS: (\d+)\]', final_response)
+                        days = int(days_match.group(1)) if days_match else 3
+                        next_contact = datetime.now() + timedelta(days=days)
+                    
+                    await update_buddy_status(db, user_id, "postponed", next_contact)
+                elif "ASSIGN_CONFIRM" in final_response or "NEXT_TASK" in final_response or tool_called:
+                    await update_buddy_status(db, user_id, "active")
+                    # FETCH LATEST TASKS FOR AUTO-REFRESH
+                    latest_state = await get_user_learning_state(db, user_id)
+                    tasks = latest_state["active_tasks"]
+                    print(f"📊 Task change detected: returning {len(tasks)} active tasks for UI refresh")
+                
+                # Strip all metadata tags from final response (Scenario, Next Contact, Days, Response Type)
+                cleaned_response = re.sub(r'\[(?:SCENARIO|NEXT_CONTACT|DAYS|RESPONSE_TYPE):.*?\]', '', final_response).strip()
+                
+                return {
+                    "message": cleaned_response,
+                    "buttons": buttons,
+                    "tasks": tasks,
+                    "show_task_list": False, # DO NOT show selection UI for auto-assignments
+                    "status": "success",
+                    "messages": result["messages"],
+                }
+            else:
+                cleaned_response, buttons = extract_response_type_and_buttons(final_response)
+                
+                tasks = []
+                if tool_called:
+                    latest_state = await get_user_learning_state(db, user_id)
+                    tasks = latest_state["active_tasks"]
+                    print(f"📊 Tool-based task change detected in {intent} mode: returning {len(tasks)} tasks")
+
+                return {
+                    "message": cleaned_response,
+                    "buttons": buttons,
+                    "tasks": tasks,
+                    "show_task_list": False,
+                    "status": "success",
+                    "messages": result["messages"],
+                }
 
     except Exception as e:
         print(f"\n❌ ERROR: {str(e)}")

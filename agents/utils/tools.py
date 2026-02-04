@@ -3,7 +3,8 @@
 from langchain_core.tools import tool
 from bson import ObjectId
 import httpx
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
 
 
 def create_agent_tools(db):
@@ -272,6 +273,59 @@ def create_agent_tools(db):
             traceback.print_exc()
             return f"Error fetching resume data: {str(e)}"
 
+    @tool
+    async def get_first_task_by_skill(skill_name: str, user_id: str) -> str:
+        """
+        Find the first recommended task for a specific skill (e.g., 'Frontend', 'Python', 'ML', 'AI').
+        Use this when a user chooses a specific learning path or sub-path.
+        """
+        try:
+            from .study_buddy_helper import get_first_task_for_skill
+            task = await get_first_task_for_skill(db, skill_name, user_id)
+            if task:
+                # Store task details for potential assignment
+                return json.dumps({
+                    "success": True,
+                    "task_id": str(task["_id"]),
+                    "title": task.get("title", task.get("name", "Unnamed Task")),
+                    "description": task.get("description", "No description available.")
+                })
+            return json.dumps({"success": False, "message": f"No unassigned tasks found for skill: {skill_name}"})
+        except Exception as e:
+            return json.dumps({"success": False, "message": str(e)})
+
+    @tool
+    async def assign_task_to_user_tool(task_id: str, user_id: str) -> str:
+        """
+        Assign a identified task to a user's active tasks dashboard.
+        
+        Args:
+            task_id: The MongoDB ID string of the task to assign
+            user_id: The ID of the user to assign the task to
+        """
+        try:
+            from .study_buddy_helper import assign_task_to_user
+            success = await assign_task_to_user(db, user_id, ObjectId(task_id))
+            if success:
+                return "Task assigned successfully to user dashboard."
+            return "Failed to assign task."
+        except Exception as e:
+            return f"Error assigning task: {str(e)}"
+
+    @tool
+    async def update_followup_date(user_id: str, days_from_now: int) -> str:
+        """
+        Schedule the next time the Study Buddy should contact the user.
+        Use this when the user is busy or wants to postpone.
+        """
+        try:
+            from .study_buddy_helper import update_buddy_status
+            next_date = datetime.now() + timedelta(days=days_from_now)
+            await update_buddy_status(db, user_id, "postponed", next_date)
+            return f"Follow-up scheduled for {next_date.strftime('%Y-%m-%d')}."
+        except Exception as e:
+            return f"Error: {str(e)}"
+
     return [
         get_user_goals, 
         get_assigned_projects, 
@@ -279,5 +333,8 @@ def create_agent_tools(db):
         get_chat_history, 
         save_chat_history,
         save_resume_data,
-        get_resume_data
+        get_resume_data,
+        get_first_task_by_skill,
+        assign_task_to_user_tool,
+        update_followup_date
     ]
