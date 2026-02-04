@@ -258,3 +258,12 @@ class ProjectWithTasksAndStatus(BaseModel):
     status: str = "active"
     created_at: datetime
     tasks: List[TaskWithStatus] = Field(default_factory=list)
+
+class Notice(BaseModel):
+    """Model for noticeboard messages"""
+    model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
+    id: Optional[str] = None
+    title: str
+    content: str
+    createdAt: datetime = Field(default_factory=datetime.now)
+    createdBy: str = "admin"

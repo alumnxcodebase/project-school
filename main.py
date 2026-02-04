@@ -5,7 +5,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
-from routers import projects, chat, goals, tasks, assignedprojects, preferences
+from routers import projects, chat, goals, tasks, assignedprojects, preferences, notices
 from agents.learning_agent import get_learning_agent
 
 load_dotenv()
@@ -36,6 +36,9 @@ async def create_db_indexes(db):
         
         # Preferences index
         await db.preferences.create_index([("userId", 1)], unique=True)
+        
+        # Notices index
+        await db.notices.create_index([("createdAt", -1)])
         
         print("✅ [Background] All indexes verified/created")
     except Exception as e:
@@ -77,6 +80,7 @@ app.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
 app.include_router(chat.router, prefix="/chat", tags=["Chat"])
 app.include_router(assignedprojects.router, prefix="/assignedprojects", tags=["Assigned Projects"])
 app.include_router(preferences.router, prefix="/preferences", tags=["Preferences"])
+app.include_router(notices.router, prefix="/notices", tags=["Notice Board"])
 
 
 @app.get("/health")
