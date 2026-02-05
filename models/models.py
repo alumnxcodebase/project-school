@@ -267,3 +267,17 @@ class Notice(BaseModel):
     content: str
     createdAt: datetime = Field(default_factory=datetime.now)
     createdBy: str = "admin"
+
+class QuizQuestion(BaseModel):
+    """Model for a single quiz question"""
+    question: str
+    options: List[str]
+    correctAnswer: str
+    explanation: str
+
+class Quiz(BaseModel):
+    """Model for a task quiz containing multiple questions"""
+    model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
+    id: Optional[str] = None
+    taskId: str
+    questions: List[QuizQuestion]

@@ -5,7 +5,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
-from routers import projects, chat, goals, tasks, assignedprojects, preferences, notices
+from routers import projects, chat, goals, tasks, assignedprojects, preferences, notices, quizzes
 from agents.learning_agent import get_learning_agent
 
 load_dotenv()
@@ -66,7 +66,12 @@ app = FastAPI(title="Project + Agentic AI API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://projectschool.alumnx.com",
+        "https://dashboard.alumnx.com"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -81,6 +86,7 @@ app.include_router(chat.router, prefix="/chat", tags=["Chat"])
 app.include_router(assignedprojects.router, prefix="/assignedprojects", tags=["Assigned Projects"])
 app.include_router(preferences.router, prefix="/preferences", tags=["Preferences"])
 app.include_router(notices.router, prefix="/notices", tags=["Notice Board"])
+app.include_router(quizzes.router, prefix="/quizzes", tags=["Quizzes"])
 
 
 @app.get("/health")
