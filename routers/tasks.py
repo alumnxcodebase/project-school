@@ -16,6 +16,7 @@ from models import (
     Comment,
     BulkLoadTasksRequest
 )
+import os
 
 class BulkTaskAssignment(BaseModel):
     taskId: str
@@ -361,12 +362,12 @@ async def get_user_tasks(request: Request, user_id: str):
             
             # Get project details
             project_id = task.get("project_id")
-            project_name = "Unknown Project"
+            project_name = "Personal"
             
             if project_id and ObjectId.is_valid(project_id):
                 project = await db.projects.find_one({"_id": ObjectId(project_id)})
                 if project:
-                    project_name = project.get("name", "Unknown Project")
+                    project_name = project.get("name", "Personal")
             
             # Build response
             task_response = TaskResponse(
@@ -831,10 +832,17 @@ async def update_task_updated_date(request: Request, req: UpdateTaskUpdatedDateR
 class TriggerEmailRequest(BaseModel):
     userId: str
 
+class CustomEmailRequest(BaseModel):
+    userId: str
+    message: str
+    userName: Optional[str] = None
+    userEmail: Optional[str] = None
+
 def get_ordinal_date_string(dt: datetime) -> str:
     """Returns date in format: 22nd Feb 2026"""
-    suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(dt.day % 10 if dt.day > 20 or dt.day < 10 else 0, 'th')
-    return dt.strftime(f"%-d{suffix} %b %Y")
+    day = dt.day
+    suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(day % 10 if day > 20 or day < 10 else 0, 'th')
+    return dt.strftime(f"{day}{suffix} %b %Y")
 
 @router.post("/trigger-email", status_code=200)
 async def trigger_email(request: Request, req: TriggerEmailRequest = Body(...)):
@@ -985,27 +993,40 @@ async def broadcast_task(request: Request, body: Dict[str, Any] = Body(...)):
 @router.post("/sync-admin-tasks/{user_id}", status_code=200)
 async def sync_admin_tasks(request: Request, user_id: str):
     """
-    Assign all existing admin-created tasks to a new user.
+    Assign all existing admin/system-created tasks to a specific user.
     Skips tasks already assigned or with matching content.
+    Uses bulk updates for performance.
     """
     db = request.app.state.db
     
-    # Get all admin-created tasks
-    admin_tasks_cursor = db.tasks.find({"createdBy": "admin"})
+    # 1. Fetch all admin/system tasks (createdBy is "admin" or None)
+    admin_tasks_cursor = db.tasks.find({
+        "$or": [
+            {"createdBy": "admin"},
+            {"createdBy": None}
+        ]
+    })
     admin_tasks = await admin_tasks_cursor.to_list(length=None)
     
-    # Get user's current assignments
+    if not admin_tasks:
+        return {"status": "success", "message": "No admin tasks found to sync", "addedCount": 0}
+
+    # 2. Get user's current assignments to prevent duplicates
     assignment = await db.assignments.find_one({"userId": user_id})
-    user_task_ids = []
-    user_task_contents = []
+    user_task_ids = set()
+    user_task_contents = set()
     
     if assignment and assignment.get("tasks"):
-        user_task_ids = [t.get("taskId") for t in assignment.get("tasks")]
-        task_ids = [ObjectId(tid) for tid in user_task_ids if ObjectId.is_valid(tid)]
-        assigned_details = await db.tasks.find({"_id": {"$in": task_ids}}).to_list(length=None)
-        user_task_contents = [(t.get("title"), t.get("description")) for t in assigned_details]
+        user_task_ids = {t.get("taskId") for t in assignment.get("tasks") if t.get("taskId")}
+        
+        # Fetch details of existing tasks to check content-based duplicates
+        task_obj_ids = [ObjectId(tid) for tid in user_task_ids if ObjectId.is_valid(tid)]
+        if task_obj_ids:
+            assigned_details = await db.tasks.find({"_id": {"$in": task_obj_ids}}).to_list(length=None)
+            user_task_contents = {(t.get("title", t.get("name")), t.get("description")) for t in assigned_details}
 
-    synced_count = 0
+    # 3. Filter for tasks the user doesn't have yet
+    new_assignments = []
     for task in admin_tasks:
         task_id_str = str(task["_id"])
         
@@ -1014,24 +1035,112 @@ async def sync_admin_tasks(request: Request, user_id: str):
             continue
             
         # Skip if content match
-        if (task.get("title"), task.get("description")) in user_task_contents:
+        if (task.get("title", task.get("name")), task.get("description")) in user_task_contents:
             continue
 
-        # Assign task
+        # Prepare for bulk assignment
         new_task_assignment = TaskAssignment(
             taskId=task_id_str,
             assignedBy="admin",
             taskStatus="active"
         ).model_dump()
-
-        await db.assignments.update_one(
-            {"userId": user_id},
-            {
-                "$push": {"tasks": new_task_assignment},
-                "$setOnInsert": {"userId": user_id, "id": str(ObjectId())}
-            },
-            upsert=True
-        )
-        synced_count += 1
+        new_assignments.append(new_task_assignment)
         
-    return {"status": "success", "message": f"Synced {synced_count} admin tasks to user"}
+        # Update trackers to avoid duplicates within same scan
+        user_task_ids.add(task_id_str)
+        user_task_contents.add((task.get("title", task.get("name")), task.get("description")))
+
+    if not new_assignments:
+        return {"status": "success", "message": "User already has all admin tasks assigned", "addedCount": 0}
+
+    # 4. Perform bulk update
+    await db.assignments.update_one(
+        {"userId": user_id},
+        {
+            "$push": {"tasks": {"$each": new_assignments}},
+            "$setOnInsert": {"userId": user_id, "id": str(ObjectId())}
+        },
+        upsert=True
+    )
+        
+    return {
+        "status": "success", 
+        "message": f"Successfully synced {len(new_assignments)} admin tasks to user {user_id}",
+        "addedCount": len(new_assignments)
+    }
+
+@router.post("/send-custom-email", status_code=200)
+async def send_custom_email(request: Request, req: CustomEmailRequest = Body(...)):
+    """
+    Send a custom templated email directly via ZeptoMail.
+    """
+    print(f"DEBUG: Received request for user: {req.userId}")
+    user_id = req.userId
+    custom_message = req.message
+    user_name = req.userName
+    user_email = req.userEmail
+    
+    if not user_id or not custom_message:
+        raise HTTPException(status_code=422, detail="Missing userId or message")
+
+    db = request.app.state.db
+    
+    # 1. Get User details (Use provided ones or fetch from DB)
+    if not user_email or not user_name:
+        # Try to fetch from DB if not provided
+        try:
+            obj_id = ObjectId(user_id)
+            user_doc = await db.users.find_one({"_id": obj_id})
+            if user_doc:
+                user_email = user_email or user_doc.get("email")
+                user_name = user_name or user_doc.get("fullName") or user_doc.get("userName") or "Student"
+        except Exception:
+            pass # Continue with what we have
+
+    if not user_email:
+        # Final fallback/error if we still don't have email
+        raise HTTPException(status_code=404, detail="User email not found. Please provide it in the request.")
+    
+    user_name = user_name or "Student"
+
+    # 2. Prepare Payload for ZeptoMail
+    current_date = get_ordinal_date_string(datetime.now())
+    template_id = "2518b.6d1e43aa616e32a8.k1.f80371c0-025f-11f1-9250-ae9c7e0b6a9f.19c2c97aadc"
+    
+    zepto_payload = {
+        "from": {"address": "support@alumnx.com", "name": "Alumnx AI Labs"},
+        "to": [{"email_address": {"address": user_email, "name": user_name}}],
+        "template_key": template_id,
+        "merge_info": {
+            "date": current_date,
+            "name": user_name,
+            "agent_message": custom_message
+        }
+    }
+
+    # 3. Send to ZeptoMail directly
+    zepto_token = os.getenv("ZEPTO_MAIL_TOKEN")
+    if not zepto_token:
+        raise HTTPException(status_code=500, detail="ZeptoMail token not configured in backend")
+
+    url = "https://api.zeptomail.in/v1.1/email/template"
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "authorization": zepto_token
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=zepto_payload, headers=headers, timeout=10.0)
+            
+        if response.status_code >= 200 and response.status_code < 300:
+            print(f"✅ Custom email sent successfully to {user_email}")
+            return {"status": "success", "message": "Custom email sent successfully", "zepto_response": response.json()}
+        else:
+            print(f"❌ ZeptoMail API returned error: {response.status_code} - {response.text}")
+            raise HTTPException(status_code=response.status_code, detail=f"ZeptoMail service error: {response.text}")
+            
+    except httpx.RequestError as e:
+        print(f"❌ Network error calling ZeptoMail: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"Failed to connect to ZeptoMail service: {str(e)}")
