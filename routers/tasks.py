@@ -48,9 +48,11 @@ async def get_all_tasks(request: Request, project_id: str = None, userId: str = 
     
     # Filter tasks by createdBy if userId is provided
     if userId:
+        ADMIN_ID = "6928870c5b168f52cf8bd77a"
         query["$or"] = [
             {"createdBy": None},
             {"createdBy": "admin"},
+            {"createdBy": ADMIN_ID},
             {"createdBy": userId}
         ]
     
@@ -368,10 +370,31 @@ async def get_user_tasks(request: Request, user_id: str):
             project_id = task.get("project_id")
             project_name = "Personal"
             
+            ADMIN_ID = "6928870c5b168f52cf8bd77a"
+            admin_creators = [None, "admin", ADMIN_ID]
+
             if project_id and ObjectId.is_valid(project_id):
                 project = await db.projects.find_one({"_id": ObjectId(project_id)})
                 if project:
                     project_name = project.get("name", "Personal")
+                    
+                    # --- Privacy Check ---
+                    # Ensure user only sees tasks from:
+                    # 1. Admin projects (Global)
+                    # 2. Their own private projects
+                    # 3. Tasks explicitly assigned to them? (Wait, if I assign a task to you in my private project, you should see it?
+                    #    The user request says: "task created by the user in the project should also be visible to the user only"
+                    #    So strict privacy is requested.)
+                    
+                    creator = project.get("createdBy")
+                    is_admin_project = creator in admin_creators
+                    is_owner = creator == user_id
+                    is_admin_req = user_id == ADMIN_ID
+                    
+                    if not (is_admin_project or is_owner or is_admin_req):
+                        # Skip this task if it belongs to a private project of another user
+                        # excluding admin of course
+                        continue
             
             # Build response
             task_response = TaskResponse(
