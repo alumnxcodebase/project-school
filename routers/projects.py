@@ -20,18 +20,22 @@ async def list_projects(request: Request, userId: Optional[str] = None):
     """Get all projects - admin projects and user-created projects"""
     db = request.app.state.db
     
-    # Build query to get admin projects (createdBy is None or admin user) 
+    ADMIN_ID = "6928870c5b168f52cf8bd77a"
+    
+    # Build query to get admin projects (createdBy is None, "admin", or admin user) 
     # and projects created by the current user
+    admin_creators = [None, "admin", ADMIN_ID]
+    
     if userId:
         query = {
             "$or": [
-                {"createdBy": None},  # Admin projects
-                {"createdBy": "6928870c5b168f52cf8bd77a"},  # Specific admin user
-                {"createdBy": userId}  # User's own projects
+                {"createdBy": {"$in": admin_creators}},
+                {"createdBy": userId}
             ]
         }
     else:
-        query = {}
+        # If no userId provided, ONLY show admin projects
+        query = {"createdBy": {"$in": admin_creators}}
     
     print(f"🔍 Fetching projects with query: {query}")
     cursor = db.projects.find(query).sort("created_at", -1)
@@ -66,7 +70,19 @@ async def get_project_details(request: Request, project_id: str, userId: Optiona
     project = await db.projects.find_one({"_id": ObjectId(project_id)})
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    # Visibility Check
+    ADMIN_ID = "6928870c5b168f52cf8bd77a"
+    admin_creators = [None, "admin", ADMIN_ID]
+    creator = project.get("createdBy")
     
+    is_admin_req = userId == ADMIN_ID
+    is_admin_project = creator in admin_creators
+    is_owner = userId == creator
+
+    if not (is_admin_req or is_admin_project or is_owner):
+        raise HTTPException(status_code=403, detail="Access denied to private project")
+
     project_data = serialize(project)
     
 
@@ -167,6 +183,18 @@ async def get_project_tasks_assigned_to_user(
     project = await db.projects.find_one({"_id": ObjectId(req.projectId)})
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Visibility Check
+    ADMIN_ID = "6928870c5b168f52cf8bd77a"
+    admin_creators = [None, "admin", ADMIN_ID]
+    creator = project.get("createdBy")
+    
+    is_admin_req = req.userId == ADMIN_ID
+    is_admin_project = creator in admin_creators
+    is_owner = req.userId == creator
+
+    if not (is_admin_req or is_admin_project or is_owner):
+        raise HTTPException(status_code=403, detail="Access denied to private project")
     
     # Get all tasks for this project (admin or user-created)
     task_query = {

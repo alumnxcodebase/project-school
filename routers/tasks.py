@@ -91,7 +91,11 @@ async def create_task(request: Request, task: Task = Body(...)):
     skill_type = task_dict.get("skillType")
     auto_assign = task_dict.get("autoAssign", True)
     
-    if skill_type and auto_assign:
+    ADMIN_ID = "6928870c5b168f52cf8bd77a"
+    admin_creators = [None, "admin", ADMIN_ID]
+    creator = task_dict.get("createdBy")
+
+    if skill_type and auto_assign and (creator in admin_creators):
         print(f"🔄 Checking preferences for auto-assigning task {task_id_str} ({skill_type})")
         
         # Query for users with preferences containing "All" or the specific skillType
@@ -670,7 +674,7 @@ async def bulk_assign_tasks_to_user(request: Request, bulk_req: BulkAssignTasksR
             taskId=task.taskId,
             assignedBy="admin",
             sequenceId=task.sequenceId,
-            taskStatus="pending",
+            taskStatus="active",
             expectedCompletionDate=None
         ).model_dump()
         for task in tasks
