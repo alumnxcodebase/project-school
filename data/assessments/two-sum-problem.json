@@ -1,0 +1,168 @@
+{
+    "taskId": "two-sum-problem",
+    "title": "Two Sum (Practical)",
+    "description": "Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.",
+    "endpoint_requirements": {
+        "method": "POST",
+        "headers": {
+            "Content-Type": "application/json"
+        }
+    },
+    "test_cases": [
+        {
+            "id": "tc_1",
+            "description": "Basic example case",
+            "input": {
+                "nums": [
+                    2,
+                    7,
+                    11,
+                    15
+                ],
+                "target": 9
+            },
+            "expected_output": {
+                "indices": [
+                    0,
+                    1
+                ]
+            }
+        },
+        {
+            "id": "tc_2",
+            "description": "Example 2",
+            "input": {
+                "nums": [
+                    3,
+                    2,
+                    4
+                ],
+                "target": 6
+            },
+            "expected_output": {
+                "indices": [
+                    1,
+                    2
+                ]
+            }
+        },
+        {
+            "id": "tc_3",
+            "description": "Same number used twice",
+            "input": {
+                "nums": [
+                    3,
+                    3
+                ],
+                "target": 6
+            },
+            "expected_output": {
+                "indices": [
+                    0,
+                    1
+                ]
+            }
+        },
+        {
+            "id": "tc_4",
+            "description": "Zero in array",
+            "input": {
+                "nums": [
+                    0,
+                    4,
+                    3,
+                    0
+                ],
+                "target": 0
+            },
+            "expected_output": {
+                "indices": [
+                    0,
+                    3
+                ]
+            }
+        },
+        {
+            "id": "tc_5",
+            "description": "Negative numbers",
+            "input": {
+                "nums": [
+                    -1,
+                    -2,
+                    -3,
+                    -4,
+                    -5
+                ],
+                "target": -8
+            },
+            "expected_output": {
+                "indices": [
+                    2,
+                    4
+                ]
+            }
+        },
+        {
+            "id": "tc_6",
+            "description": "Large numbers",
+            "input": {
+                "nums": [
+                    1000000,
+                    500,
+                    200,
+                    1000000
+                ],
+                "target": 2000000
+            },
+            "expected_output": {
+                "indices": [
+                    0,
+                    3
+                ]
+            }
+        },
+        {
+            "id": "tc_7",
+            "description": "Solution at the end of array",
+            "input": {
+                "nums": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    10,
+                    20
+                ],
+                "target": 30
+            },
+            "expected_output": {
+                "indices": [
+                    5,
+                    6
+                ]
+            }
+        },
+        {
+            "id": "tc_8",
+            "description": "Unsorted array with gap",
+            "input": {
+                "nums": [
+                    1,
+                    5,
+                    2,
+                    9,
+                    3,
+                    4
+                ],
+                "target": 14
+            },
+            "expected_output": {
+                "indices": [
+                    1,
+                    3
+                ]
+            }
+        }
+    ]
+}
