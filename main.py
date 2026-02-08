@@ -5,7 +5,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
-from routers import projects, chat, goals, tasks, assignedprojects, preferences, notices, quizzes
+from routers import projects, chat, goals, tasks, assignedprojects, preferences, notices, quizzes, assessments
 from agents.learning_agent import get_learning_agent
 
 load_dotenv()
@@ -89,6 +89,7 @@ app.include_router(assignedprojects.router, prefix="/assignedprojects", tags=["A
 app.include_router(preferences.router, prefix="/preferences", tags=["Preferences"])
 app.include_router(notices.router, prefix="/notices", tags=["Notice Board"])
 app.include_router(quizzes.router, prefix="/quizzes", tags=["Quizzes"])
+app.include_router(assessments.router, prefix="/assessments", tags=["Assessments"])
 
 
 @app.get("/health")
