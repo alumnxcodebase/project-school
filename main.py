@@ -55,27 +55,18 @@ async def lifespan(app: FastAPI):
     app.state.agent = get_learning_agent(db)
 
     # Start index creation in the background
-    asyncio.create_task(create_db_indexes(db))
+    # asyncio.create_task(create_db_indexes(db))
 
     print("🚀 API and Agent Ready")
     yield
     client.close()
 
 
-app = FastAPI(title="Project + Agentic AI API", lifespan=lifespan)
+app = FastAPI(title="Project + Agentic AI API", lifespan=lifespan, redirect_slashes=False)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://projectschool.alumnx.com",
-        "https://dashboard.alumnx.com",
-        "https://alumnx.com",
-        "https://www.alumnx.com",
-        "https://alumnx-project-school-ui.vercel.app" # Added just in case
-    ],
-    allow_origin_regex="https://.*alumnx\.com", # Even more permissive for subdomains
+    allow_origins=["*"], # Use wildcard temporarily to rule out CORS while fixing 502
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
