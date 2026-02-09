@@ -66,7 +66,14 @@ app = FastAPI(title="Project + Agentic AI API", lifespan=lifespan, redirect_slas
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Use wildcard temporarily to rule out CORS while fixing 502
+    allow_origins=[
+        "https://alumnx.com",
+        "https://www.alumnx.com",
+        "https://projectschool.alumnx.com",
+        "https://dashboard.alumnx.com",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
