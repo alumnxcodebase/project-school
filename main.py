@@ -69,6 +69,8 @@ app.add_middleware(
     allow_origins=[
         "https://alumnx.com",
         "https://www.alumnx.com",
+        "http://alumnx.com",
+        "http://www.alumnx.com",
         "https://projectschool.alumnx.com",
         "https://dashboard.alumnx.com",
         "http://localhost:3000",

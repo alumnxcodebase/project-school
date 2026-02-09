@@ -5,6 +5,7 @@ uvicorn
 # Database
 motor
 pymongo
+dnspython
 
 # Environment and Utilities
 python-dotenv
