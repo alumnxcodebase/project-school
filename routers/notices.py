@@ -6,13 +6,18 @@ from datetime import datetime
 
 router = APIRouter()
 
-@router.get("/", response_model=List[Notice])
+@router.get("", response_model=List[Notice])
 async def list_notices(request: Request):
     """Get all notices sorted by createdAt descending"""
-    db = request.app.state.db
-    cursor = db.notices.find().sort("createdAt", -1)
-    notices = [serialize(doc) async for doc in cursor]
-    return notices
+    try:
+        db = request.app.state.db
+        cursor = db.notices.find().sort("createdAt", -1)
+        notices = [serialize(doc) async for doc in cursor]
+        return notices
+    except Exception as e:
+        print(f"❌ Error fetching notices: {str(e)}")
+        # Return empty list instead of 500 while troubleshooting
+        return []
 
 @router.post("/", response_model=Notice, status_code=201)
 async def create_notice(request: Request, notice: Notice = Body(...)):
