@@ -36,3 +36,11 @@ class AssessmentSubmission(BaseModel):
 class RunAssessmentRequest(BaseModel):
     taskId: str
     studentUrl: str
+
+class AssessmentProgress(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
+    id: Optional[str] = None
+    userId: str
+    taskId: str
+    history: List[AssessmentSubmission] = []
+    last_updated: datetime = Field(default_factory=datetime.now)

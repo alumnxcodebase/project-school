@@ -1,0 +1,82 @@
+{
+    "taskId": "product-crud-assessment",
+    "title": "Product CRUD Assessment",
+    "description": "Implement a full CRUD API for products. Your API should handle the product list based on the provided CSV data. Endpoints should support GET (All/Single), POST, PUT, and DELETE.",
+    "endpoint_requirements": {
+        "headers": {
+            "Content-Type": "application/json"
+        }
+    },
+    "test_cases": [
+        {
+            "id": "tc_post",
+            "description": "POST - Add 'Wireless Keyboard'",
+            "method": "POST",
+            "path": "/products",
+            "input": {
+                "name": "Wireless Keyboard",
+                "description": "A compact keyboard that connects via Bluetooth or USB receiver offering clutter-free typing."
+            },
+            "expected_output": {
+                "name": "Wireless Keyboard",
+                "description": "A compact keyboard that connects via Bluetooth or USB receiver offering clutter-free typing."
+            }
+        },
+        {
+            "id": "tc_get_all",
+            "description": "GET ALL - Fetch the list of all products",
+            "method": "GET",
+            "path": "/products",
+            "input": {},
+            "expected_output": [
+                {
+                    "name": "Wireless Keyboard"
+                }
+            ]
+        },
+        {
+            "id": "tc_get_single",
+            "description": "GET SINGLE - Fetch one product using its ID (ID: 1)",
+            "method": "GET",
+            "path": "/products/1",
+            "input": {},
+            "expected_output": {
+                "name": "Wireless Keyboard"
+            }
+        },
+        {
+            "id": "tc_put",
+            "description": "PUT - Update Product 1 (Wireless Mouse)",
+            "method": "PUT",
+            "path": "/products/1",
+            "input": {
+                "name": "Wireless Mouse",
+                "description": "A battery-powered mouse that eliminates cables while providing smooth and accurate control."
+            },
+            "expected_output": {
+                "name": "Wireless Mouse"
+            }
+        },
+        {
+            "id": "tc_delete",
+            "description": "DELETE - Remove Product 1",
+            "method": "DELETE",
+            "path": "/products/1",
+            "input": {},
+            "expected_output": {
+                "message": "Product deleted successfully"
+            }
+        },
+        {
+            "id": "tc_verify_delete",
+            "description": "GET - Confirm 1 is gone",
+            "method": "GET",
+            "path": "/products/1",
+            "input": {},
+            "expected_status": 404,
+            "expected_output": {
+                "error": "Product not found"
+            }
+        }
+    ]
+}
