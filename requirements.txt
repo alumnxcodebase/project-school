@@ -1,6 +1,7 @@
 # Web Framework
 fastapi
 uvicorn
+python-multipart
 
 # Database
 motor
@@ -12,12 +13,17 @@ python-dotenv
 pydantic
 pydantic-settings
 typing-extensions
+python-dateutil
+
+# HTTP Client
+httpx
 
 # LangChain and AI Agentic Framework
 langchain
 langchain-core
 langchain-google-genai
 langgraph
+langsmith
 
 # Testing (Required for the .py test files provided)
 requests
