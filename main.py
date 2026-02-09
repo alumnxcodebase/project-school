@@ -72,8 +72,10 @@ app.add_middleware(
         "https://projectschool.alumnx.com",
         "https://dashboard.alumnx.com",
         "https://alumnx.com",
-        "https://www.alumnx.com"
+        "https://www.alumnx.com",
+        "https://alumnx-project-school-ui.vercel.app" # Added just in case
     ],
+    allow_origin_regex="https://.*alumnx\.com", # Even more permissive for subdomains
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -98,4 +100,5 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8001, reload=True)
+    # Bind to 0.0.0.0 for easier production/deployment access
+    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
