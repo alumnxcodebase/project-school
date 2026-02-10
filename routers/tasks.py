@@ -98,6 +98,7 @@ async def create_task(request: Request, task: Task = Body(...)):
     creator = task_dict.get("createdBy")
 
     if skill_type and auto_assign and (creator in admin_creators):
+        print(f"🔄 [AUTO-ASSIGN] Triggered for task '{task_dict.get('title')}' ({skill_type})")
         print(f"🔄 Checking preferences for auto-assigning task {task_id_str} ({skill_type})")
         
         # Query for users with preferences containing "All" or the specific skillType
@@ -164,8 +165,11 @@ async def create_task(request: Request, task: Task = Body(...)):
                 upsert=True
             )
             assigned_count += 1
+            print(f"✅ [AUTO-ASSIGN] Linked task {task_id_str} to user {user_id}")
             
-        print(f"✅ Auto-assigned task {task_id_str} to {assigned_count} users")
+        print(f"🏁 [AUTO-ASSIGN] Completed: Task {task_id_str} assigned to {assigned_count} users")
+    else:
+        print(f"⏭️ [AUTO-ASSIGN] Skipped for task {task_id_str}: skillType={skill_type}, autoAssign={auto_assign}, creator={creator}")
 
     return serialize(created_task)
 
@@ -413,6 +417,7 @@ async def get_user_tasks(request: Request, user_id: str):
                 comments=task_assignment.get("comments", []),
                 createdBy=task.get("createdBy"),
                 isEnabled=task.get("isEnabled", False),
+                isValidation=task.get("isValidation", False),
                 day=task.get("day"),
                 taskType=task.get("taskType")
             )
@@ -954,14 +959,18 @@ async def trigger_email(request: Request, req: TriggerEmailRequest = Body(...)):
 @router.post("/broadcast-task", status_code=200)
 async def broadcast_task(request: Request, body: Dict[str, Any] = Body(...)):
     """
-    Broadcast a task to ALL users in the system, bypassing skill preferences.
+    Broadcast a task to specific users or ALL users in the system, bypassing skill preferences.
     """
     db = request.app.state.db
     task_id = body.get("taskId")
     admin_id = body.get("adminId") # For verification
+    user_ids = body.get("userIds") # List of specific user IDs to broadcast to
     
     if admin_id != "6928870c5b168f52cf8bd77a":
         raise HTTPException(status_code=403, detail="Unauthorized broadcast attempt")
+
+    if not task_id:
+        raise HTTPException(status_code=400, detail="taskId is required")
 
     task_doc = await db.tasks.find_one({"_id": ObjectId(task_id)})
     if not task_doc:
@@ -972,49 +981,38 @@ async def broadcast_task(request: Request, body: Dict[str, Any] = Body(...)):
 
     assign_count = 0
     
-    # We will use bulk write for better performance if possible, but iterative is safer for now with the specific schema
-    # Fetch all users
-    users_cursor = db.users.find({}, {"_id": 1})
+    # Determine target users
+    if user_ids and isinstance(user_ids, list):
+        # Convert string IDs to ObjectIds for query if necessary
+        query = {"_id": {"$in": [ObjectId(uid) if ObjectId.is_valid(uid) else uid for uid in user_ids]}}
+    else:
+        # Fallback to all users if no list provided
+        query = {}
+
+    users_cursor = db.users.find(query, {"_id": 1})
     
     async for user in users_cursor:
         user_id = str(user["_id"])
         
-        # Check for duplicate by ID or Content
+        # Check for duplicate by ID in user's assignments
         assignment = await db.assignments.find_one({"userId": user_id})
         is_duplicate = False
         
         if assignment and assignment.get("tasks"):
-            existing_task_ids = set()
             for t in assignment.get("tasks"):
-                if t.get("taskId"):
-                    existing_task_ids.add(str(t.get("taskId")))
-            
-            # Check ID Match
-            if task_id in existing_task_ids:
-                is_duplicate = True
-            
-            # Check Content Match (only if not already found by ID)
-            if not is_duplicate:
-                # Optimized: We know the task details from task_doc
-                # We need to check if any assigned task matches title/description
-                # This could be slow for many users, but correct.
-                # To speed up, we can fetch all assigned tasks details... or just trust ID for now?
-                # User complaint: "not marking it as active".
-                # Let's trust ID match mostly, but content match is important for re-broadcasts of similar tasks.
-                pass 
-                # (Skipping deep content check for speed in this iteration, relying on ID is standard)
+                if str(t.get("taskId")) == task_id:
+                    is_duplicate = True
+                    break
 
         if is_duplicate:
-            # OPTIONAL: If it exists but is pending, update to active?
-            # The user wants "broadcast ... mark as active".
-            # If user already has it as 'pending', we should upgrade it to 'active'.
+            # If it exists, ensure it is set to 'active' as per broadcast requirement
             await db.assignments.update_one(
                 {"userId": user_id, "tasks.taskId": task_id},
                 {"$set": {"tasks.$.taskStatus": "active"}}
             )
             continue
 
-        # Valid Assignment
+        # Valid New Assignment
         new_task_assignment = {
             "taskId": task_id,
             "assignedBy": "admin",
@@ -1024,7 +1022,7 @@ async def broadcast_task(request: Request, body: Dict[str, Any] = Body(...)):
             "comments": []
         }
         
-        # Use simple push
+        # Update/Upsert user assignment list
         await db.assignments.update_one(
             {"userId": user_id},
             {
@@ -1035,7 +1033,8 @@ async def broadcast_task(request: Request, body: Dict[str, Any] = Body(...)):
         )
         assign_count += 1
 
-    return {"status": "success", "message": f"Task broadcasted to {assign_count} users (and ensured specific active status)"}
+    target_desc = f"{len(user_ids)} selected users" if user_ids else "all users"
+    return {"status": "success", "message": f"Task broadcasted to {assign_count} users (Target: {target_desc})"}
 
 
 @router.post("/sync-admin-tasks/{user_id}", status_code=200)
