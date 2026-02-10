@@ -144,7 +144,7 @@ def validate_response(expected: Any, actual: Any) -> bool:
 
 @router.post("/run", response_model=AssessmentSubmission)
 async def run_assessment(
-    request: RunAssessmentRequest,
+    eval_request: RunAssessmentRequest,
     db: AsyncIOMotorDatabase = Depends(get_db)
     # verify_token dependency would normally go here to get userId
 ):
@@ -154,12 +154,12 @@ async def run_assessment(
     user_id = "test_user_id" # Replace with actual user extraction logic
     
     # Load config (awaitable now)
-    config = await load_assessment_config(request.taskId, db)
+    config = await load_assessment_config(eval_request.taskId, db)
     
     test_cases = config.get("test_cases", [])
     
     # Get base URL from request, but allow test cases to append paths
-    base_student_url = request.studentUrl.rstrip('/')
+    base_student_url = eval_request.studentUrl.rstrip('/')
     
     results = []
     passed_count = 0
@@ -187,13 +187,13 @@ async def run_assessment(
                 
                 # Execute based on method
                 if method == "GET":
-                    response = await client.get(target_url, timeout=5.0)
+                    response = await client.get(target_url, timeout=1.0)
                 elif method == "PUT":
-                    response = await client.put(target_url, json=test_case.get("input"), timeout=5.0)
+                    response = await client.put(target_url, json=test_case.get("input"), timeout=1.0)
                 elif method == "DELETE":
-                    response = await client.delete(target_url, timeout=5.0)
+                    response = await client.delete(target_url, timeout=1.0)
                 else: # Default to POST
-                    response = await client.post(target_url, json=test_case.get("input"), timeout=5.0)
+                    response = await client.post(target_url, json=test_case.get("input"), timeout=1.0)
                 
                 execution_time = (time.time() - start_time) * 1000
                 result_detail.execution_time_ms = round(execution_time, 2)
@@ -238,8 +238,8 @@ async def run_assessment(
     
     submission = AssessmentSubmission(
         userId=user_id,
-        taskId=request.taskId,
-        endpoint_url=request.studentUrl,
+        taskId=eval_request.taskId,
+        endpoint_url=eval_request.studentUrl,
         status=overall_status,
         score=score,
         total_tests=len(test_cases),
@@ -250,7 +250,7 @@ async def run_assessment(
     # Save to DB - Grouped by User and Task
     # Upsert into assessment_progress collection
     await db.assessment_progress.update_one(
-        {"userId": user_id, "taskId": request.taskId},
+        {"userId": user_id, "taskId": eval_request.taskId},
         {
             "$push": {"history": submission.model_dump(by_alias=True, exclude={"id"})},
             "$set": {"last_updated": datetime.now()}
