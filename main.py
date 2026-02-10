@@ -18,7 +18,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("project-school")
 
-from routers import projects, chat, goals, tasks, assignedprojects, preferences, notices, quizzes, assessments
+from routers import projects, chat, goals, tasks, assignedprojects, preferences, notices, quizzes, assessments, projectschool
 from agents.learning_agent import get_learning_agent
 
 load_dotenv()
@@ -108,8 +108,9 @@ app.include_router(preferences.router, prefix="/preferences", tags=["Preferences
 app.include_router(notices.router, prefix="/notices", tags=["Notice Board"])
 app.include_router(quizzes.router, prefix="/quizzes", tags=["Quizzes"])
 app.include_router(assessments.router, prefix="/assessments", tags=["Assessments"])
+app.include_router(projectschool.router, prefix="/api/projectschool", tags=["Project School"])
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     db_status = "Connected" if hasattr(app.state, 'db') and app.state.db is not None else "Disconnected"
     return {

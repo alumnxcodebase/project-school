@@ -1,7 +1,7 @@
 {
     "taskId": "product-crud-assessment",
-    "title": "Product CRUD Assessment",
-    "description": "Implement a full CRUD API for products. Your API should handle the product list based on the provided CSV data. Endpoints should support GET (All/Single), POST, PUT, and DELETE.",
+    "title": "(Practical) Product CRUD Assessment",
+    "description": "Goal: Implement a RESTful API for a Product Management system.\n\nRequirements:\n- Use the provided data (Wireless Keyboard, Wireless Mouse, etc.) for names and descriptions.\n- The API must support the following endpoints:\n  1. GET /products - List all products.\n  2. GET /products/{id} - Get a single product by ID.\n\nValidation:\nEnter your local server URL (e.g., http://localhost:8003) and click 'Run Tests'. All test cases must pass to complete the task.",
     "endpoint_requirements": {
         "headers": {
             "Content-Type": "application/json"
@@ -9,69 +9,97 @@
     },
     "test_cases": [
         {
-            "id": "tc_post",
-            "description": "POST - Add 'Wireless Keyboard'",
-            "method": "POST",
-            "path": "/products",
-            "input": {
-                "name": "Wireless Keyboard",
-                "description": "A compact keyboard that connects via Bluetooth or USB receiver offering clutter-free typing."
-            },
-            "expected_output": {
-                "name": "Wireless Keyboard",
-                "description": "A compact keyboard that connects via Bluetooth or USB receiver offering clutter-free typing."
-            }
-        },
-        {
             "id": "tc_get_all",
             "description": "GET ALL - Fetch the list of all products",
             "method": "GET",
             "path": "/products",
             "input": {},
+            "expected_output_subset": true,
             "expected_output": [
                 {
+                    "id": 1,
                     "name": "Wireless Keyboard"
+                },
+                {
+                    "id": 2,
+                    "name": "Wireless Mouse"
+                },
+                {
+                    "id": 3,
+                    "name": "Mechanical Keyboard"
+                },
+                {
+                    "id": 4,
+                    "name": "Laptop Cooling Pad"
+                },
+                {
+                    "id": 5,
+                    "name": "USB Hub"
+                },
+                {
+                    "id": 6,
+                    "name": "External Hard Drive"
+                },
+                {
+                    "id": 7,
+                    "name": "SSD External Drive"
+                },
+                {
+                    "id": 8,
+                    "name": "Webcam"
+                },
+                {
+                    "id": 9,
+                    "name": "Noise Cancelling Headphones"
+                },
+                {
+                    "id": 10,
+                    "name": "Laptop Stand"
+                },
+                {
+                    "id": 11,
+                    "name": "Monitor"
                 }
             ]
         },
         {
-            "id": "tc_get_single",
-            "description": "GET SINGLE - Fetch one product using its ID (ID: 1)",
+            "id": "tc_get_id_1",
+            "description": "GET SINGLE - Fetch Product 1 (Wireless Keyboard)",
             "method": "GET",
             "path": "/products/1",
             "input": {},
             "expected_output": {
+                "id": 1,
                 "name": "Wireless Keyboard"
             }
         },
         {
-            "id": "tc_put",
-            "description": "PUT - Update Product 1 (Wireless Mouse)",
-            "method": "PUT",
-            "path": "/products/1",
-            "input": {
-                "name": "Wireless Mouse",
-                "description": "A battery-powered mouse that eliminates cables while providing smooth and accurate control."
-            },
-            "expected_output": {
-                "name": "Wireless Mouse"
-            }
-        },
-        {
-            "id": "tc_delete",
-            "description": "DELETE - Remove Product 1",
-            "method": "DELETE",
-            "path": "/products/1",
+            "id": "tc_get_id_5",
+            "description": "GET SINGLE - Fetch Product 5 (USB Hub)",
+            "method": "GET",
+            "path": "/products/5",
             "input": {},
             "expected_output": {
-                "message": "Product deleted successfully"
+                "id": 5,
+                "name": "USB Hub"
             }
         },
         {
-            "id": "tc_verify_delete",
-            "description": "GET - Confirm 1 is gone",
+            "id": "tc_get_id_11",
+            "description": "GET SINGLE - Fetch Product 11 (Monitor)",
             "method": "GET",
-            "path": "/products/1",
+            "path": "/products/11",
+            "input": {},
+            "expected_output": {
+                "id": 11,
+                "name": "Monitor"
+            }
+        },
+        {
+            "id": "tc_get_404",
+            "description": "GET SINGLE - Help 404 for non-existent ID",
+            "method": "GET",
+            "path": "/products/99",
             "input": {},
             "expected_status": 404,
             "expected_output": {

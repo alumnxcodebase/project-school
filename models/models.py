@@ -44,6 +44,7 @@ class Task(BaseModel):
     createdBy: Optional[str] = None
     updatedAt: Optional[datetime] = None
     isEnabled: bool = False
+    isValidation: bool = False
     autoAssign: bool = True  # Defaults to True for backward compatibility
 
 class TaskAssignment(BaseModel):
@@ -82,6 +83,7 @@ class TaskResponse(BaseModel):
     comments: List[Comment] = Field(default_factory=list)
     createdBy: Optional[str] = None
     isEnabled: bool = False
+    isValidation: bool = False
     day: Optional[str] = None
     taskType: Optional[Literal["Theory", "Practical"]] = None
 
@@ -102,6 +104,7 @@ class BulkTaskItem(BaseModel):
     estimatedTime: float
     skillType: str
     isEnabled: bool = False
+    isValidation: bool = False
     day: Optional[str] = None
     taskType: Optional[Literal["Theory", "Practical"]] = None
 
@@ -133,6 +136,7 @@ class TaskUpdate(BaseModel):
     skillType: Optional[str] = None
     priority: Optional[str] = None
     isEnabled: Optional[bool] = None
+    isValidation: Optional[bool] = None
     day: Optional[str] = None
     taskType: Optional[Literal["Theory", "Practical"]] = None
 
@@ -214,6 +218,7 @@ class TaskWithAssignment(BaseModel):
     taskType: Optional[Literal["Theory", "Practical"]] = None
     isAssigned: bool = False
     isEnabled: bool = False
+    isValidation: bool = False
 
 class GetProjectTasksRequest(BaseModel):
     """Request model for getting project tasks with assignment status"""
@@ -247,6 +252,7 @@ class TaskWithStatus(BaseModel):
     taskStatus: Optional[Literal["pending", "active", "completed"]] = None
     isAssigned: bool = False
     isEnabled: bool = False
+    isValidation: bool = False
 
 class ProjectWithTasksAndStatus(BaseModel):
     """Response model for project details with tasks and their status"""
