@@ -7,7 +7,7 @@ Overall, this file serves as the single source of truth for the platform's data 
 ensuring consistency across project management, learning workflows, and user progress tracking.
 """
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict, Any
 from datetime import datetime
 from bson import ObjectId
 
@@ -287,3 +287,26 @@ class Quiz(BaseModel):
     id: Optional[str] = None
     taskId: str
     questions: List[QuizQuestion]
+
+class Achievement(BaseModel):
+    id: str
+    name: str
+    icon: str
+    unlockedAt: datetime = Field(default_factory=datetime.now)
+
+class UserStats(BaseModel):
+    """Model for user gamification stats (XP, Streak, Level)"""
+    model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
+    id: Optional[str] = None
+    userId: str
+    totalXP: int = 0
+    level: int = 1
+    currentStreak: int = 0
+    lastActivityDate: Optional[datetime] = None
+    achievements: List[Achievement] = Field(default_factory=list)
+
+class DashboardStatsResponse(BaseModel):
+    """Aggregated response for dashboard stats"""
+    stats: Dict[str, Any]
+    gamification: Dict[str, Any]
+    skills: List[Dict[str, Any]]
