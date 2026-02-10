@@ -3,7 +3,9 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from bson import ObjectId
+from bson import ObjectId
 from utils.helpers import serialize
+from models import UserStats, DashboardStatsResponse, Assignment, Task
 
 router = APIRouter()
 
@@ -120,3 +122,118 @@ async def get_preferences(request: Request, body: Dict[str, Any] = Body(...)):
         return {"status": "success", "preferences": {"userId": user_id, "preferences": []}}
     
     return {"status": "success", "preferences": serialize(prefs_doc)}
+
+@router.get("/dashboard-stats/{userId}", response_model=DashboardStatsResponse)
+async def get_dashboard_stats(request: Request, userId: str):
+    db = request.app.state.db
+    
+    # 1. Fetch User Stats (Lazy Init)
+    user_stats = await db.user_stats.find_one({"userId": userId})
+    if not user_stats:
+        new_stats = UserStats(userId=userId)
+        await db.user_stats.insert_one(new_stats.model_dump(exclude={"id"}))
+        user_stats = new_stats.model_dump()
+    else:
+        user_stats = serialize(user_stats)
+
+    # 2. Fetch User Tasks & Assignments
+    # We need to join Assignments with Tasks to get skillType and status
+    assignments_doc = await db.user_task_assignments.find_one({"userId": userId})
+    
+    user_tasks = []
+    if assignments_doc:
+        task_list = assignments_doc.get("tasks", [])
+        task_ids = [ObjectId(t["taskId"]) for t in task_list if ObjectId.is_valid(t["taskId"])]
+        
+        # Fetch task details
+        tasks_cursor = db.tasks.find({"_id": {"$in": task_ids}})
+        all_tasks = {str(doc["_id"]): doc async for doc in tasks_cursor}
+        
+        for t in task_list:
+            t_id = t["taskId"]
+            if t_id in all_tasks:
+                task_details = all_tasks[t_id]
+                user_tasks.append({
+                    "taskId": t_id,
+                    "status": t.get("taskStatus", "pending"),
+                    "skillType": task_details.get("skillType", "General"),
+                    "title": task_details.get("title", ""),
+                    "estimatedTime": task_details.get("estimatedTime", 0)
+                })
+
+    # 3. Calculate Stats
+    total_active = sum(1 for t in user_tasks if t["status"] == "active")
+    total_completed = sum(1 for t in user_tasks if t["status"] == "completed")
+    
+    # 4. Calculate Skills Progress
+    skills_map = {}
+    for t in user_tasks:
+        skill = t["skillType"]
+        if skill not in skills_map:
+            skills_map[skill] = {"total": 0, "completed": 0}
+        skills_map[skill]["total"] += 1
+        if t["status"] == "completed":
+            skills_map[skill]["completed"] += 1
+            
+    skills_list = []
+    for skill, counts in skills_map.items():
+        percentage = int((counts["completed"] / counts["total"]) * 100) if counts["total"] > 0 else 0
+        skills_list.append({
+            "name": skill,
+            "percentage": percentage,
+            "total": counts["total"],
+            "completed": counts["completed"]
+        })
+
+    return {
+        "stats": {
+            "active": total_active,
+            "completed": total_completed
+        },
+        "gamification": user_stats,
+        "skills": skills_list
+    }
+
+@router.post("/log-activity", status_code=200)
+async def log_activity(request: Request, body: Dict[str, Any] = Body(...)):
+    """Update XP and Streak when a task is completed"""
+    db = request.app.state.db
+    user_id = body.get("userId")
+    xp_earned = body.get("xp", 0)
+    
+    if not user_id:
+        raise HTTPException(status_code=400, detail="userId is required")
+        
+    user_stats = await db.user_stats.find_one({"userId": user_id})
+    today = datetime.now()
+    
+    update_ops = {
+        "$inc": {"totalXP": xp_earned},
+        "$set": {"lastActivityDate": today}
+    }
+    
+    # Simple Streak Logic (Reset if last activity was before yesterday)
+    # Real implementation would require precise date comparison
+    if user_stats:
+        last_date = user_stats.get("lastActivityDate")
+        if last_date:
+            delta = today - last_date
+            if delta.days == 1:
+                update_ops["$inc"]["currentStreak"] = 1
+            elif delta.days > 1:
+                update_ops["$set"]["currentStreak"] = 1
+        else:
+             update_ops["$set"]["currentStreak"] = 1
+    else:
+        # Create if not exists (handled by update with upsert=True mostly, but let's be safe)
+        new_stats = UserStats(userId=user_id, totalXP=xp_earned, currentStreak=1, lastActivityDate=today)
+        await db.user_stats.insert_one(new_stats.model_dump(exclude={"id"}))
+        return {"status": "success", "message": "Stats created"}
+
+    await db.user_stats.update_one(
+        {"userId": user_id},
+        update_ops,
+        upsert=True
+    )
+    
+    return {"status": "success", "earned": xp_earned}
