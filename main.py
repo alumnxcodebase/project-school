@@ -62,28 +62,60 @@ async def lifespan(app: FastAPI):
         logger.info(f"✅ Connected to database: {db_name}")
 
         # Initialize Agent
-        logger.info("🤖 Initializing Learning Agent...")
+        
         app.state.agent = get_learning_agent(db)
-        logger.info("✅ Learning Agent initialized")
+    
 
     except Exception as e:
-        logger.error(f"💥 Critical error during startup: {str(e)}")
+        logger.error(f"Critical error during startup: {str(e)}")
         # In production, we might want to continue so /health works, 
         # but the app will likely 500 on other routes.
         app.state.db = None
 
+    # Main DB Setup (for Users)
+    main_mongodb_url = os.getenv("MAIN_MONGODB_URL")
+    
+    # We clean quotes if user copy-pasted with quotes
+    main_client = None
+    
+    if main_mongodb_url:
+        main_mongodb_url = main_mongodb_url.strip('"').strip("'")
+        try:
+            # Mask credentials for logging
+            log_url = main_mongodb_url.split('@')[-1] if '@' in main_mongodb_url else main_mongodb_url[:20]
+            logger.info(f"🔌 Connecting to Main MongoDB: {log_url}...")
+            
+            main_client = AsyncIOMotorClient(main_mongodb_url, serverSelectionTimeoutMS=5000)
+            # Ping
+            await main_client.admin.command('ping')
+            
+            # Use get_default_database() which gets the DB from the URI path
+            app.state.main_db = main_client.get_default_database()
+            
+        except Exception as e:
+           
+            app.state.main_db = None
+    else:
+        
+        app.state.main_db = None
+
     logger.info("🚀 API Ready")
     yield
+    
     if hasattr(app.state, 'db') and app.state.db is not None:
         client.close()
-        logger.info("🔌 Database connection closed")
+        logger.info("🔌 Projects Database connection closed")
+        
+    if main_client:
+        main_client.close()
+        logger.info("🔌 Main Database connection closed")
 
 app = FastAPI(title="Project + Agentic AI API", lifespan=lifespan, redirect_slashes=False)
 
 # Add Global Exception Handler for robustness
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"❌ UNHANDLED EXCEPTION: {str(exc)}", exc_info=True)
+    
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal Server Error - Check server logs", "error": str(exc)},
@@ -97,6 +129,13 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"]
 )
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+   
+    response = await call_next(request)
+    logger.info(f"✅ {request.method} {request.url.path} -> {response.status_code}")
+    return response
 
 # Include Routers
 app.include_router(goals.router, prefix="/goals", tags=["Goals"])
