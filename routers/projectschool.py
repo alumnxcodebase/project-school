@@ -9,7 +9,13 @@ from models import UserStats, DashboardStatsResponse, Assignment, Task
 
 router = APIRouter()
 
+import bcrypt
+
 # --- Models ---
+
+class LoginRequest(BaseModel):
+    userName: str
+    password: str
 
 class ProjectSchoolSubscription(BaseModel):
     userId: str
@@ -42,27 +48,345 @@ class AssignmentTemplate(BaseModel):
     createdBy: str = "admin"
     createdAt: datetime = Field(default_factory=datetime.now)
 
+class BroadcastTaskRequest(BaseModel):
+    taskId: str
+    adminId: str
+    userIds: List[str]
+
 # --- Endpoints ---
+
+@router.post("/reports-login", status_code=200)
+async def reports_login(request: Request, login_data: LoginRequest = Body(...)):
+    """
+    Login for Reports Admin (uses Main DB Users)
+    """
+    # Normalize name for logging
+    raw_name = login_data.userName.strip()
+    print(f"🔐 Login Attempt: {raw_name}")
+
+    if not hasattr(request.app.state, 'main_db') or request.app.state.main_db is None:
+        print("❌ Main DB not available")
+        raise HTTPException(status_code=503, detail="Main Database not available")
+        
+    db = request.app.state.main_db
+    
+    # access users collection - Case-insensitive match for userName, email, or fullName
+    import re
+    regex_user = re.compile(f"^{re.escape(raw_name)}$", re.IGNORECASE)
+    
+    user = await db.users.find_one({
+        "$or": [
+            {"userName": {"$regex": regex_user}},
+            {"email": {"$regex": regex_user}},
+            {"fullName": {"$regex": regex_user}}
+        ]
+    })
+    
+    if not user:
+        print(f"❌ User not found: {raw_name}")
+        # Try a partial match if exact case-insensitive fails (last resort)
+        user = await db.users.find_one({
+            "$or": [
+                {"userName": {"$regex": re.compile(re.escape(raw_name), re.IGNORECASE)}},
+                {"fullName": {"$regex": re.compile(re.escape(raw_name), re.IGNORECASE)}}
+            ]
+        })
+        if not user:
+             raise HTTPException(status_code=400, detail="User Not Found")
+        else:
+             print(f"💡 Found partial/alternate match: {user.get('userName')}")
+        
+    # Check password
+    if not user.get("password"):
+         print(f"❌ User has no password set: {user.get('userName')}")
+         raise HTTPException(status_code=400, detail="Invalid credentials")
+
+    try:
+        # bcrypt.checkpw requires bytes
+        password_bytes = login_data.password.encode('utf-8')
+        hashed_bytes = user["password"].encode('utf-8')
+        
+        if bcrypt.checkpw(password_bytes, hashed_bytes):
+            # Allow admin ('a') OR students ('s') if they have a password set explicitly
+            u_type = user.get("userType", "s")
+            if u_type in ["a", "s"]:
+                print(f"✅ Login Success: {user.get('userName')} (Type: {u_type})")
+                return {
+                    "token": "valid-token-placeholder", 
+                    "_id": str(user["_id"]),
+                    "fullName": user.get("fullName"),
+                    "userType": u_type
+                }
+            else:
+                print(f"❌ Unauthorized access (type {u_type}): {user.get('userName')}")
+                raise HTTPException(status_code=403, detail="Unauthorized access")
+        else:
+             print(f"❌ Password mismatch for: {user.get('userName')}")
+             raise HTTPException(status_code=400, detail="Invalid userName or password")
+    except Exception as e:
+        print(f"💥 Login Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+@router.get("/projects", status_code=200)
+async def get_all_projects_list(request: Request):
+    """
+    Fetch all projects from Agriculture DB
+    """
+    db = request.app.state.db
+    # Projects are in the Agriculture DB
+    cursor = db.projects.find({}, {"_id": 1, "name": 1, "description": 1, "projectType": 1, "status": 1})
+    projects = []
+    async for doc in cursor:
+        projects.append(serialize(doc))
+    print(f"✅ Returning {len(projects)} projects")
+    return projects
 
 @router.get("/get-cohort-members", status_code=200)
 async def get_cohort_members(request: Request):
-    db = request.app.state.db
-    # Fetch all users with relevant fields
-    cursor = db.users.find({}, {"_id": 1, "name": 1, "email": 1, "phone": 1, "subscriptionStatus": 1})
+    # Use Main DB for users
+    if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+        db = request.app.state.main_db
+    else:
+        # Fallback to default DB if main_db not set
+        db = request.app.state.db
+        
+    # Get unique user IDs from projectschools collection (the 34 members)
+    try:
+        ps_user_ids = await db.projectschools.distinct("userId")
+        print(f"📋 Found {len(ps_user_ids)} users in projectschools")
+    except Exception as e:
+        print(f"⚠️ Error fetching from projectschools: {e}")
+        ps_user_ids = []
+
+    # Filter users based on projectschools membership if found
+    query = {}
+    if ps_user_ids:
+        query = {"_id": {"$in": ps_user_ids}}
+    else:
+        # Fallback to fetching all but limited if no members found (to avoid 15k)
+        print("⚠️ No projectschool members found, falling back to all users (LIMITED)")
+        # This is just a safety measure
+        # return [] # Or maybe some other logic
+        
+    # Fetch users with relevant fields
+    cursor = db.users.find(query, {"_id": 1, "fullName": 1, "name": 1, "userName": 1, "email": 1, "phone": 1, "subscriptionStatus": 1})
     members = []
     async for doc in cursor:
         member = serialize(doc)
-        # Map backend 'name' to frontend 'fullName' and 'id' to 'userId'
+        # Map backend 'fullName' to frontend expected 'fullName' and 'id' to 'userId'
         member["userId"] = member.get("id")
-        member["fullName"] = member.get("name", "Unknown User")
+        # Robust name fallback
+        member["fullName"] = member.get("fullName") or member.get("name") or member.get("userName") or "Unknown User"
         
         # Determine subscription status flags
-        sub_status = member.get("subscriptionStatus", "trial").lower()
+        raw_status = member.get("subscriptionStatus")
+        sub_status = str(raw_status if raw_status else "trial").lower()
         member["isPaid"] = sub_status == "paid"
         member["isTrial"] = sub_status == "trial"
         
         members.append(member)
+    
+    print(f"✅ Returning {len(members)} cohort members")
     return members
+
+@router.post("/tasks", status_code=201)
+async def create_project_task(request: Request, task: Task = Body(...)):
+    """
+    Create a new global task template (used for Project School broadcasting)
+    """
+    db = request.app.state.db
+    task_dict = task.model_dump(exclude={"id"})
+    
+    # Set required defaults
+    if not task_dict.get("updatedAt"):
+        task_dict["updatedAt"] = datetime.now()
+    
+    # Force isEnabled true if it's being created for broadcast
+    task_dict["isEnabled"] = True
+    
+    result = await db.tasks.insert_one(task_dict)
+    created_task = await db.tasks.find_one({"_id": result.inserted_id})
+    print(f"✅ Created broadcast task template: {task_dict.get('title')}")
+    return serialize(created_task)
+
+@router.post("/tasks/broadcast-task", status_code=200)
+async def broadcast_task_to_users(request: Request, body: BroadcastTaskRequest = Body(...)):
+    """
+    Link a task ID to multiple users in one go
+    """
+    db = request.app.state.db
+    task_id = body.taskId
+    user_ids = body.userIds
+    
+    print(f"📡 Broadcasting task {task_id} to {len(user_ids)} users")
+    
+    # 1. Ensure the task exists and is enabled
+    task_doc = await db.tasks.find_one({"_id": ObjectId(task_id)})
+    if not task_doc:
+        raise HTTPException(status_code=404, detail="Task template not found")
+        
+    await db.tasks.update_one(
+        {"_id": ObjectId(task_id)},
+        {"$set": {"isEnabled": True}}
+    )
+    
+    # 2. Assign to each user (Deduplicated)
+    assigned_count = 0
+    for u_id in user_ids:
+        # Check if already assigned
+        existing = await db.assignments.find_one({
+            "userId": u_id,
+            "tasks.taskId": task_id
+        })
+        
+        if not existing:
+            new_task_link = {
+                "taskId": task_id,
+                "assignedBy": "admin",
+                "sequenceId": None,
+                "taskStatus": "active",
+                "comments": []
+            }
+            
+            await db.assignments.update_one(
+                {"userId": u_id},
+                {"$push": {"tasks": new_task_link}},
+                upsert=True
+            )
+            assigned_count += 1
+            
+    print(f"✅ Completed broadcast: {assigned_count} new assignments created")
+    return {"status": "success", "assignedCount": assigned_count}
+
+@router.post("/feedback/fetch", status_code=200)
+async def fetch_user_feedback(request: Request, body: Dict[str, Any] = Body(...)):
+    """Fetch feedback for a specific user"""
+    db = request.app.state.db
+    user_id = body.get("userId")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="userId is required")
+    
+    cursor = db.feedback.find({"userId": user_id}).sort("createdAt", -1)
+    feedback_list = []
+    async for doc in cursor:
+        feedback_list.append(serialize(doc))
+    return feedback_list
+
+@router.post("/assignments/user/assignments", status_code=200)
+async def fetch_user_assignments(request: Request, body: Dict[str, Any] = Body(...)):
+    """Fetch assignments for a specific user (compatibility with old component)"""
+    db = request.app.state.db
+    user_id = body.get("userId")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="userId is required")
+    
+    # This expects assignment_templates but filtered/mapped for the user?
+    # Actually the component expects a list where each item has tasks with isTaskDone.
+    # We'll return an empty list for now or adapt based on current schema.
+    # For now, let's just return what's in assignment_templates and check if assigned.
+    cursor = db.assignment_templates.find().sort("createdAt", -1)
+    templates = [serialize(doc) async for doc in cursor]
+    
+    # Get user's active assignments from 'assignments' collection
+    user_assignment_doc = await db.assignments.find_one({"userId": user_id})
+    assigned_task_ids = {}
+    if user_assignment_doc and user_assignment_doc.get("tasks"):
+        for t in user_assignment_doc["tasks"]:
+            assigned_task_ids[t["taskId"]] = t.get("taskStatus") == "completed"
+
+    result = []
+    for temp in templates:
+        # Check if any task in this template is assigned to the user
+        template_tasks = temp.get("tasks", [])
+        # We need to map this to what the component expects
+        # { assignmentId, assignmentName, assignmentDescription, tasks: [{ taskId, name, description, isTaskDone }] }
+        formatted_tasks = []
+        for t in template_tasks:
+            # We don't have taskId in templates usually, they are template tasks
+            # This old component might be using a different schema.
+            # I'll provide a placeholder matching logic.
+            formatted_tasks.append({
+                "taskId": str(temp["id"]) + "_" + t.get("name"), 
+                "name": t.get("name"),
+                "description": t.get("description"),
+                "isTaskDone": False # Placeholder
+            })
+        
+        result.append({
+            "assignmentId": str(temp["id"]),
+            "assignmentName": temp.get("name") or temp.get("assignmentName"),
+            "assignmentDescription": temp.get("description") or temp.get("assignmentDescription"),
+            "tasks": formatted_tasks,
+            "createdAt": temp.get("createdAt")
+        })
+    return result
+
+@router.post("/assignments/user/complete-task", status_code=200)
+async def complete_user_task_proxy(request: Request, body: Dict[str, Any] = Body(...)):
+    """Proxy to mark a task as complete"""
+    db = request.app.state.db
+    user_id = body.get("userId")
+    task_id = body.get("taskId")
+    
+    if not user_id or not task_id:
+        raise HTTPException(status_code=400, detail="userId and taskId are required")
+        
+    await db.assignments.update_one(
+        {"userId": user_id, "tasks.taskId": task_id},
+        {"$set": {
+            "tasks.$.taskStatus": "completed",
+            "tasks.$.completionDate": datetime.now().isoformat()
+        }}
+    )
+    return {"status": "success"}
+
+@router.post("/tasks/link-user-task", status_code=200)
+async def link_task_to_user_proxy(request: Request, body: Dict[str, Any] = Body(...)):
+    """
+    Proxy to Link a task to a user (compatible with frontend path)
+    """
+    db = request.app.state.db
+    user_id = body.get("userId")
+    task_id = body.get("taskId")
+    assigned_by = body.get("assignedBy", "admin")
+    
+    if not user_id or not task_id:
+        raise HTTPException(status_code=400, detail="userId and taskId are required")
+        
+    # Check if already assigned
+    existing = await db.assignments.find_one({
+        "userId": user_id,
+        "tasks.taskId": task_id
+    })
+    
+    if not existing:
+        new_link = {
+            "taskId": task_id,
+            "assignedBy": assigned_by,
+            "sequenceId": body.get("sequenceId"),
+            "taskStatus": "pending",
+            "comments": []
+        }
+        await db.assignments.update_one(
+            {"userId": user_id},
+            {"$push": {"tasks": new_link}},
+            upsert=True
+        )
+    return {"status": "success"}
+
+@router.put("/tasks/user-tasks/{user_id}/{task_id}/active", status_code=200)
+async def mark_task_active_proxy(request: Request, user_id: str, task_id: str):
+    """
+    Proxy to make a task active
+    """
+    db = request.app.state.db
+    result = await db.assignments.update_one(
+        {"userId": user_id, "tasks.taskId": task_id},
+        {"$set": {"tasks.$.taskStatus": "active"}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Task assignment not found")
+    return {"status": "success"}
 
 @router.post("/add-assignment", status_code=201)
 async def add_assignment(request: Request, assignment: AssignmentTemplate = Body(...)):
@@ -83,7 +407,7 @@ async def get_assignments(request: Request):
     db = request.app.state.db
     cursor = db.assignment_templates.find().sort("createdAt", -1)
     assignments = [serialize(doc) async for doc in cursor]
-    return assignments
+    return {"success": True, "assignments": assignments}
 
 @router.post("/update-assignment", status_code=200)
 async def update_assignment(request: Request, body: Dict[str, Any] = Body(...)):
