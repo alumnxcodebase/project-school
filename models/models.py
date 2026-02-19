@@ -45,7 +45,8 @@ class Task(BaseModel):
     updatedAt: Optional[datetime] = None
     isEnabled: bool = False
     isValidation: bool = False
-    autoAssign: bool = True  # Defaults to True for backward compatibility
+    autoAssign: bool = False  # Defaults to False to prevent accidental auto-assignment
+    isGlobal: bool = False   # Defaults to False for privacy-first visibility
 
 class TaskAssignment(BaseModel):
     """Individual task assignment details"""
@@ -265,14 +266,6 @@ class ProjectWithTasksAndStatus(BaseModel):
     created_at: datetime
     tasks: List[TaskWithStatus] = Field(default_factory=list)
 
-class Notice(BaseModel):
-    """Model for noticeboard messages"""
-    model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
-    id: Optional[str] = None
-    title: str
-    content: str
-    createdAt: datetime = Field(default_factory=datetime.now)
-    createdBy: str = "admin"
 
 class QuizQuestion(BaseModel):
     """Model for a single quiz question"""
