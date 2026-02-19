@@ -88,48 +88,46 @@ async def get_project_details(request: Request, project_id: str, userId: Optiona
 
     
     
-    # Build query to get tasks created by admin or the specified user
+    # Build query with strict visibility: Creator OR Global OR Assigned
     task_query = {"project_id": project_id}
     
-    # Check if user is Admin
-    ADMIN_ID = "6928870c5b168f52cf8bd77a"
-    is_admin = userId == ADMIN_ID
+    visibility_conditions = [
+        {"isGlobal": True} # Curriculum tasks
+    ]
     
-    if userId and not is_admin:
-        # Standard visibility conditions for NON-ADMIN users
-        or_conditions = [
-            {"createdBy": None},
-            {"createdBy": "admin"},
-            {"createdBy": ADMIN_ID},
-            {"createdBy": userId}
-        ]
+    if userId:
+        # User is creator
+        visibility_conditions.append({"createdBy": userId})
         
-        # Also include tasks assigned to this user (regardless of creator)
+        # User is assigned
         try:
-            user_dist = await db.assignments.find_one({"userId": userId})
-            if user_dist and user_dist.get("tasks"):
-                assigned_ids = []
-                for t in user_dist.get("tasks", []):
-                    tid = t.get("taskId")
-                    if tid and ObjectId.is_valid(tid):
-                        assigned_ids.append(ObjectId(tid))
-                
+            assignment_doc = await db.assignments.find_one({"userId": userId})
+            if assignment_doc and assignment_doc.get("tasks"):
+                assigned_ids = [ObjectId(t["taskId"]) for t in assignment_doc["tasks"] if ObjectId.is_valid(t.get("taskId"))]
                 if assigned_ids:
-                    or_conditions.append({"_id": {"$in": assigned_ids}})
+                    visibility_conditions.append({"_id": {"$in": assigned_ids}})
         except Exception as e:
             print(f"Error fetching assignments in project details: {e}")
-            
-        task_query["$or"] = or_conditions
+
+    # Admin bypass: if userId is ADMIN_ID, show everything in project
+    ADMIN_ID = "6928870c5b168f52cf8bd77a"
+    if userId != ADMIN_ID:
+        task_query["$or"] = visibility_conditions
     
+
     # Add sorting by updatedAt descending (newest first)
     tasks_cursor = db.tasks.find(task_query).sort([("updatedAt", -1)])
     tasks = [serialize(task) async for task in tasks_cursor]
-    
+
+
+
     # Get user's assignments if userId is provided
     task_status_map = {}
     if userId:
         assignment = await db.assignments.find_one({"userId": userId})
         if assignment and assignment.get("tasks"):
+            assigned_ids_str = [t.get("taskId") for t in assignment["tasks"]]
+
             for task_assignment in assignment.get("tasks", []):
                 task_status_map[task_assignment.get("taskId")] = task_assignment.get("taskStatus")
     
@@ -137,10 +135,11 @@ async def get_project_details(request: Request, project_id: str, userId: Optiona
     tasks_with_status = []
     for task in tasks:
         task_id = task.get("id")
+        task_is_assigned = task_id in task_status_map
         task_with_status = {
             **task,
             "taskStatus": task_status_map.get(task_id),
-            "isAssigned": task_id in task_status_map,
+            "isAssigned": task_is_assigned,
             "isEnabled": task.get("isEnabled", False)
         }
         tasks_with_status.append(task_with_status)
@@ -196,16 +195,23 @@ async def get_project_tasks_assigned_to_user(
     if not (is_admin_req or is_admin_project or is_owner):
         raise HTTPException(status_code=403, detail="Access denied to private project")
     
-    # Get all tasks for this project (admin or user-created)
-    task_query = {
-        "project_id": req.projectId,
-        "$or": [
-            {"createdBy": None},
-            {"createdBy": "admin"},
-            {"createdBy": "6928870c5b168f52cf8bd77a"},
-            {"createdBy": req.userId}
-        ]
-    }
+    # Visibility Query
+    task_query = {"project_id": req.projectId}
+    
+    visibility_conditions = [{"isGlobal": True}]
+    if req.userId:
+        visibility_conditions.append({"createdBy": req.userId})
+        
+        # Assigned tasks
+        assignment_doc = await db.assignments.find_one({"userId": req.userId})
+        if assignment_doc and assignment_doc.get("tasks"):
+            assigned_ids = [ObjectId(t["taskId"]) for t in assignment_doc["tasks"] if ObjectId.is_valid(t.get("taskId"))]
+            if assigned_ids:
+                visibility_conditions.append({"_id": {"$in": assigned_ids}})
+    
+    ADMIN_ID = "6928870c5b168f52cf8bd77a"
+    if req.userId != ADMIN_ID:
+        task_query["$or"] = visibility_conditions
     # Add sorting by updatedAt descending (newest first)
     tasks_cursor = db.tasks.find(task_query).sort([("updatedAt", -1)])
     tasks = await tasks_cursor.to_list(length=None)
@@ -229,7 +235,8 @@ async def get_project_tasks_assigned_to_user(
             estimatedTime=task.get("estimatedTime", 0),
             skillType=task.get("skillType", "General"),
             isAssigned=(task_id in assigned_task_ids),
-            isEnabled=task.get("isEnabled", False)
+            isEnabled=task.get("isEnabled", False),
+            isGlobal=task.get("isGlobal", False)
         )
         tasks_with_assignment.append(task_with_assignment)
     

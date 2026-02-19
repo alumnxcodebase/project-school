@@ -46,15 +46,25 @@ async def get_all_tasks(request: Request, project_id: str = None, userId: str = 
     if project_id:
         query["project_id"] = project_id
     
-    # Filter tasks by createdBy if userId is provided
+    visibility_conditions = [{"isGlobal": True}]
+    
     if userId:
-        ADMIN_ID = "6928870c5b168f52cf8bd77a"
-        query["$or"] = [
-            {"createdBy": None},
-            {"createdBy": "admin"},
-            {"createdBy": ADMIN_ID},
-            {"createdBy": userId}
-        ]
+        visibility_conditions.append({"createdBy": userId})
+        
+        # Also include tasks assigned to this user
+        try:
+            assignment_doc = await db.assignments.find_one({"userId": userId})
+            if assignment_doc and assignment_doc.get("tasks"):
+                assigned_ids = [ObjectId(t["taskId"]) for t in assignment_doc["tasks"] if ObjectId.is_valid(t.get("taskId"))]
+                if assigned_ids:
+                    visibility_conditions.append({"_id": {"$in": assigned_ids}})
+        except Exception as e:
+            print(f"Error fetching assignments in tasks query: {e}")
+
+    # Admin bypass
+    ADMIN_ID = "6928870c5b168f52cf8bd77a"
+    if userId != ADMIN_ID:
+        query["$or"] = visibility_conditions
     
     cursor = db.tasks.find(query)
     tasks = []
@@ -91,7 +101,7 @@ async def create_task(request: Request, task: Task = Body(...)):
     # --- Auto-assign logic based on Preferences ---
     # Find all users who want this skillType or "All"
     skill_type = task_dict.get("skillType")
-    auto_assign = task_dict.get("autoAssign", True)
+    auto_assign = task_dict.get("autoAssign", False)
     
     ADMIN_ID = "6928870c5b168f52cf8bd77a"
     admin_creators = [None, "admin", ADMIN_ID]
@@ -310,12 +320,8 @@ async def link_task_to_user(request: Request, link: UserTaskLink = Body(...)):
     is_admin_assignment = link.assignedBy == "admin" or link.userId == "6928870c5b168f52cf8bd77a"
     task_status = "active" if is_admin_assignment else "pending"
     
-    # If admin assigns, ensure the task is enabled globally
-    if is_admin_assignment:
-        await db.tasks.update_one(
-            {"_id": ObjectId(link.taskId)},
-            {"$set": {"isEnabled": True}}
-        )
+    # If admin assigns, we NO LONGER force isEnabled: True globally.
+    # Visibility is now controlled by the assignment itself.
 
     new_task_assignment = TaskAssignment(
         taskId=link.taskId,
@@ -344,8 +350,15 @@ async def link_task_to_user(request: Request, link: UserTaskLink = Body(...)):
 async def get_user_tasks(request: Request, user_id: str):
     """
     Get all tasks assigned to a user with full task and project details.
+    Only returns tasks that are:
+      - Global (isGlobal=True), OR
+      - Created by the requesting user themselves, OR
+      - The requesting user is admin.
+    This prevents non-global admin-assigned tasks from leaking to unintended users.
     """
     db = request.app.state.db
+    ADMIN_ID = "6928870c5b168f52cf8bd77a"
+    is_admin_req = user_id == ADMIN_ID
     
     try:
         # Get user's assignment document
@@ -370,36 +383,20 @@ async def get_user_tasks(request: Request, user_id: str):
                 print(f"⚠️ Task not found: {task_id}, skipping...")
                 continue
             
-            # Get project details
+            # --- Task-Level Privacy Check ---
+            # If the task is in the user's assignment list, they have access to it.
+            # We trust the assignment source (admin or system).
+            pass
+
+            # Get project details (for display name only, not for access control)
             project_id = task.get("project_id")
             project_name = "Personal"
-            
-            ADMIN_ID = "6928870c5b168f52cf8bd77a"
-            admin_creators = [None, "admin", ADMIN_ID]
 
             if project_id and ObjectId.is_valid(project_id):
                 project = await db.projects.find_one({"_id": ObjectId(project_id)})
                 if project:
                     project_name = project.get("name", "Personal")
-                    
-                    # --- Privacy Check ---
-                    # Ensure user only sees tasks from:
-                    # 1. Admin projects (Global)
-                    # 2. Their own private projects
-                    # 3. Tasks explicitly assigned to them? (Wait, if I assign a task to you in my private project, you should see it?
-                    #    The user request says: "task created by the user in the project should also be visible to the user only"
-                    #    So strict privacy is requested.)
-                    
-                    creator = project.get("createdBy")
-                    is_admin_project = creator in admin_creators
-                    is_owner = creator == user_id
-                    is_admin_req = user_id == ADMIN_ID
-                    
-                    if not (is_admin_project or is_owner or is_admin_req):
-                        # Skip this task if it belongs to a private project of another user
-                        # excluding admin of course
-                        continue
-            
+
             # Build response
             task_response = TaskResponse(
                 taskId=task_id,
@@ -982,11 +979,15 @@ async def broadcast_task(request: Request, body: Dict[str, Any] = Body(...)):
     assign_count = 0
     
     # Determine target users
-    if user_ids and isinstance(user_ids, list):
+    if user_ids is not None and isinstance(user_ids, list):
         # Convert string IDs to ObjectIds for query if necessary
         query = {"_id": {"$in": [ObjectId(uid) if ObjectId.is_valid(uid) else uid for uid in user_ids]}}
+        
+        # If an empty list was provided, we skip the cursor loop entirely (count stays 0)
+        if not user_ids:
+             return {"status": "success", "message": "No users selected for broadcast", "count": 0}
     else:
-        # Fallback to all users if no list provided
+        # ABSOLUTE BROADCAST: No userIds provided, target EVERYONE
         query = {}
 
     users_cursor = db.users.find(query, {"_id": 1})

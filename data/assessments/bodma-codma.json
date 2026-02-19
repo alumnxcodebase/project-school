@@ -1,5 +1,5 @@
 {
-    "taskId": "bodma-codma-problem",
+    "taskId": "bodma-codma",
     "title": "Langgraph Agent: Bodma and Codma Calculator",
     "description": "Goal: Implement a RESTful API Endpoint using Langgraph agent and Deploy it.\nCreate a Langgraph-based AI agent that can process natural language queries to calculate Bodma and Codma operations, and handle compound operations involving both calculations.\n\nBodma Calculation: a^b / (a * b)\nCodma Calculation: (a * b) / a^b",
     "endpoint_requirements": {
@@ -13,50 +13,50 @@
             "id": "tc_1",
             "description": "Basic Bodma: a=2, b=3",
             "input": {
-                "query": "Calculate Bodma for 2 and 3"
+                "message": "Calculate Bodma for 2 and 3"
             },
             "expected_output": {
-                "result": 1.3333333333333333
+                "response": "The result of BODMA for 2 and 3 is 1.3333333333333333."
             }
         },
         {
             "id": "tc_2",
             "description": "Basic Codma: a=2, b=3",
             "input": {
-                "query": "Calculate Codma for 2 and 3"
+                "message": "Calculate Codma for 2 and 3"
             },
             "expected_output": {
-                "result": 0.75
+                "response": "The result of CODMA for 2 and 3 is 0.75."
             }
         },
         {
             "id": "tc_3",
             "description": "Base 1 Identity (Bodma): a=1, b=10",
             "input": {
-                "query": "Calculate Bodma for 1 and 10"
+                "message": "Calculate Bodma for 1 and 10"
             },
             "expected_output": {
-                "result": 0.1
+                "response": "The result of BODMA for 1 and 10 is 0.1."
             }
         },
         {
             "id": "tc_4",
             "description": "Exponent 1 Identity (Codma): a=10, b=1",
             "input": {
-                "query": "Calculate Codma for 10 and 1"
+                "message": "Calculate Codma for 10 and 1"
             },
             "expected_output": {
-                "result": 1.0
+                "response": "The result of CODMA for 10 and 1 is 1.0."
             }
         },
         {
             "id": "tc_5",
             "description": "Negative Base, Odd Exponent (Bodma): a=-2, b=3",
             "input": {
-                "query": "Calculate Bodma for -2 and 3"
+                "message": "Calculate Bodma for -2 and 3"
             },
             "expected_output": {
-                "result": 1.3333333333333333
+                "response": "The result of BODMA for -2 and 3 is 1.3333333333333333."
             }
         }
     ]
