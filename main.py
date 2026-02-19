@@ -18,7 +18,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("project-school")
 
-from routers import projects, chat, goals, tasks, assignedprojects, preferences, notices, quizzes, assessments, projectschool
+from routers import projects, chat, goals, tasks, assignedprojects, preferences, quizzes, assessments, projectschool
 from agents.learning_agent import get_learning_agent
 
 load_dotenv()
@@ -37,7 +37,7 @@ async def create_db_indexes(db):
         await db.assignedprojects.create_index([("userId", 1)])
         await db.assignedprojects.create_index([("userId", 1), ("sequenceId", 1)])
         await db.preferences.create_index([("userId", 1)], unique=True)
-        await db.notices.create_index([("createdAt", -1)])
+
         logger.info("✅ All indexes verified/created")
     except Exception as e:
         logger.warning(f"⚠️ Index creation notice: {str(e)}")
@@ -144,7 +144,7 @@ app.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
 app.include_router(chat.router, prefix="/chat", tags=["Chat"])
 app.include_router(assignedprojects.router, prefix="/assignedprojects", tags=["Assigned Projects"])
 app.include_router(preferences.router, prefix="/preferences", tags=["Preferences"])
-app.include_router(notices.router, prefix="/notices", tags=["Notice Board"])
+
 app.include_router(quizzes.router, prefix="/quizzes", tags=["Quizzes"])
 app.include_router(assessments.router, prefix="/assessments", tags=["Assessments"])
 app.include_router(projectschool.router, prefix="/api/projectschool", tags=["Project School"])

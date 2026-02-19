@@ -9,6 +9,21 @@ from models import UserStats, DashboardStatsResponse, Assignment, Task
 
 router = APIRouter()
 
+@router.get("/debug/tasks")
+async def debug_tasks(request: Request):
+    db = request.app.state.db
+    cursor = db.tasks.find().sort("updatedAt", -1).limit(10)
+    tasks = []
+    async for t in cursor:
+        tasks.append({
+            "id": str(t["_id"]),
+            "title": t.get("title"),
+            "isGlobal": t.get("isGlobal"),
+            "createdBy": t.get("createdBy"),
+            "isEnabled": t.get("isEnabled")
+        })
+    return tasks
+
 import bcrypt
 
 # --- Models ---
@@ -45,6 +60,7 @@ class AssignmentTemplate(BaseModel):
     name: str
     description: Optional[str] = None
     tasks: List[AssignmentTemplateTask] = Field(default_factory=list)
+    isGlobal: bool = False # Default to private for assignments
     createdBy: str = "admin"
     createdAt: datetime = Field(default_factory=datetime.now)
 
@@ -203,6 +219,7 @@ async def create_project_task(request: Request, task: Task = Body(...)):
     
     # Force isEnabled true if it's being created for broadcast
     task_dict["isEnabled"] = True
+    task_dict["isGlobal"] = task_dict.get("isGlobal", False) # Default to private
     
     result = await db.tasks.insert_one(task_dict)
     created_task = await db.tasks.find_one({"_id": result.inserted_id})
@@ -296,29 +313,51 @@ async def fetch_user_assignments(request: Request, body: Dict[str, Any] = Body(.
 
     result = []
     for temp in templates:
-        # Check if any task in this template is assigned to the user
+        # For security, we only show templates that have at least one task
+        # either assigned to the user OR marked as global (if templates support that)
+        # For now, we'll check if any task in this template matches an assigned taskId
+        
         template_tasks = temp.get("tasks", [])
         # We need to map this to what the component expects
         # { assignmentId, assignmentName, assignmentDescription, tasks: [{ taskId, name, description, isTaskDone }] }
         formatted_tasks = []
+        is_any_task_assigned = False
+        
         for t in template_tasks:
-            # We don't have taskId in templates usually, they are template tasks
-            # This old component might be using a different schema.
-            # I'll provide a placeholder matching logic.
+            # We don't have taskId in templates easily, they are template tasks
+            # Match by name/description or ID if available
+            t_id = str(t.get("_id", ""))
+            t_name = t.get("name")
+            
+            # This is tricky because templates don't always have taskId links
+            # But the 'link-user-task' usually links them.
+            # For now, let's allow templates ONLY if the user has assignments
+            # OR if the template is marked as global (if that field exists)
+            
+            # IMPROVEMENT: If the template has NO assigned tasks for this user, skip it?
+            # For compatibility with existing broadcast logic, we'll check if the 
+            # template name matches an active assignment roughly, or if specific tasks coincide.
+            
+            is_done = assigned_task_ids.get(t_id, False)
+            if t_id in assigned_task_ids:
+                is_any_task_assigned = True
+
             formatted_tasks.append({
-                "taskId": str(temp["id"]) + "_" + t.get("name"), 
-                "name": t.get("name"),
+                "taskId": t_id or (str(temp["id"]) + "_" + t_name), 
+                "name": t_name,
                 "description": t.get("description"),
-                "isTaskDone": False # Placeholder
+                "isTaskDone": is_done
             })
         
-        result.append({
-            "assignmentId": str(temp["id"]),
-            "assignmentName": temp.get("name") or temp.get("assignmentName"),
-            "assignmentDescription": temp.get("description") or temp.get("assignmentDescription"),
-            "tasks": formatted_tasks,
-            "createdAt": temp.get("createdAt")
-        })
+        # Only include if at least one task is assigned OR if it's explicitly global
+        if is_any_task_assigned or temp.get("isGlobal"):
+            result.append({
+                "assignmentId": str(temp["id"]),
+                "assignmentName": temp.get("name") or temp.get("assignmentName"),
+                "assignmentDescription": temp.get("description") or temp.get("assignmentDescription"),
+                "tasks": formatted_tasks,
+                "createdAt": temp.get("createdAt")
+            })
     return result
 
 @router.post("/assignments/user/complete-task", status_code=200)
@@ -364,7 +403,7 @@ async def link_task_to_user_proxy(request: Request, body: Dict[str, Any] = Body(
             "taskId": task_id,
             "assignedBy": assigned_by,
             "sequenceId": body.get("sequenceId"),
-            "taskStatus": "pending",
+            "taskStatus": "active" if assigned_by == "admin" else "pending",
             "comments": []
         }
         await db.assignments.update_one(

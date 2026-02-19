@@ -187,13 +187,13 @@ async def run_assessment(
                 
                 # Execute based on method
                 if method == "GET":
-                    response = await client.get(target_url, timeout=1.0)
+                    response = await client.get(target_url, timeout=10.0)
                 elif method == "PUT":
-                    response = await client.put(target_url, json=test_case.get("input"), timeout=1.0)
+                    response = await client.put(target_url, json=test_case.get("input"), timeout=10.0)
                 elif method == "DELETE":
-                    response = await client.delete(target_url, timeout=1.0)
+                    response = await client.delete(target_url, timeout=10.0)
                 else: # Default to POST
-                    response = await client.post(target_url, json=test_case.get("input"), timeout=1.0)
+                    response = await client.post(target_url, json=test_case.get("input"), timeout=10.0)
                 
                 execution_time = (time.time() - start_time) * 1000
                 result_detail.execution_time_ms = round(execution_time, 2)
