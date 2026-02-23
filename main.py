@@ -90,12 +90,15 @@ app = FastAPI(title="Project + Agentic AI API", lifespan=lifespan, redirect_slas
 # ============================================================================
 # API KEY VERIFICATION
 # ============================================================================
-async def verify_api_key(request: Request, x_api_key: str = Header(...)):
+async def verify_api_key(request: Request, x_api_key: str = Header(None)):
     db = request.app.state.db
+    if not x_api_key:
+        request.state.userId = ""
+        request.state.userName = ""
+        return None
     record = await db.api_keys.find_one({"apiKey": x_api_key, "isActive": True})
     if not record:
         raise HTTPException(status_code=401, detail="Invalid API Key")
-    # ✅ Store userId and userName in request.state so any router can access them
     request.state.userId = str(record.get("userId", ""))
     request.state.userName = str(record.get("userName", ""))
     return record
