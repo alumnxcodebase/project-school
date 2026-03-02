@@ -53,6 +53,9 @@ class TaskAssignment(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     taskId: str
     assignedBy: Literal["user", "admin"] = "admin"
+    assignerUserId: Optional[str] = None
+    assignerName: Optional[str] = None
+    assignerEmail: Optional[str] = None
     sequenceId: Optional[int] = None
     taskStatus: Literal["pending", "active", "completed"] = "pending"
     expectedCompletionDate: Optional[str] = None
@@ -145,6 +148,9 @@ class UserTaskLink(BaseModel):
     userId: str
     taskId: str
     assignedBy: Literal["user", "admin"] = "admin"
+    assignerUserId: Optional[str] = None
+    assignerName: Optional[str] = None
+    assignerEmail: Optional[str] = None
     sequenceId: Optional[int] = None
     expectedCompletionDate: Optional[str] = None
 
