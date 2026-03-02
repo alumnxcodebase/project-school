@@ -501,41 +501,93 @@ async def clear_all_user_tasks(request: Request, user_id: str):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to clear assigned tasks: {str(e)}")
 
-
 @router.delete("/user-tasks/{user_id}/{task_id}", status_code=200)
 async def delete_task_and_assignments(request: Request, user_id: str, task_id: str):
-    """
-    If user is creator: Delete task and remove from ALL users' assignments.
-    If user is NOT creator: deny action (use unassign endpoint instead).
-    """
     db = request.app.state.db
-    
-    # 1. Check task ownership
+
     task = await db.tasks.find_one({"_id": ObjectId(task_id)})
     if not task:
-         raise HTTPException(status_code=404, detail="Task not found")
-         
-    if task.get("createdBy") == user_id:
-        # User IS the creator: Delete task and cleanup ALL assignments
-        
-        # Delete the task document
-        await db.tasks.delete_one({"_id": ObjectId(task_id)})
-        
-        # Remove this task from ALL assignments documents
-        await db.assignments.update_many(
-            {"tasks.taskId": task_id},
-            {"$pull": {"tasks": {"taskId": task_id}}}
-        )
-        
-        return {"status": "success", "message": "Task deleted and removed from all assignments"}
-    
-    else:
-        # User is NOT the creator
-        raise HTTPException(
-            status_code=403, 
-            detail="Only the creator can delete this task. Use /task/user-task/{userId}/unassign/{taskId} to unassign yourself."
-        )
+        raise HTTPException(status_code=404, detail="Task not found")
+    task_title = task.get("title", "a task")
 
+    if task.get("createdBy") == user_id:
+
+        # Collect all assignees and their assigner details BEFORE deleting
+        affected = await db.assignments.find({"tasks.taskId": task_id}).to_list(length=None)
+        email_targets = []
+        for doc in affected:
+            for t in doc.get("tasks", []):
+                if t.get("taskId") == task_id:
+                    email_targets.append({
+                        "assigneeUserId": doc["userId"],
+                        "assignerEmail": t.get("assignerEmail"),
+                        "assignerName": t.get("assignerName", "Admin")
+                    })
+
+        # Delete task and assignments
+        await db.tasks.delete_one({"_id": ObjectId(task_id)})
+        await db.assignments.update_many({"tasks.taskId": task_id}, {"$pull": {"tasks": {"taskId": task_id}}})
+
+        # Send emails
+        zepto_token = os.getenv("ZEPTO_MAIL_TOKEN")
+        current_date = datetime.now().strftime("%d %b %Y")
+
+        # Get deleter details
+        deleter_doc = None
+        if ObjectId.is_valid(user_id):
+            if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+                deleter_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(user_id)})
+            if not deleter_doc:
+                deleter_doc = await db.users.find_one({"_id": ObjectId(user_id)})
+        deleter_name = (deleter_doc.get("fullName") or deleter_doc.get("userName", "A user")) if deleter_doc else "A user"
+        deleter_email = deleter_doc.get("email") if deleter_doc else None
+
+        for target in email_targets:
+            # Email to assignee (User2)
+            assignee_doc = None
+            if ObjectId.is_valid(target["assigneeUserId"]):
+                if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+                    assignee_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(target["assigneeUserId"])})
+                if not assignee_doc:
+                    assignee_doc = await db.users.find_one({"_id": ObjectId(target["assigneeUserId"])})
+            assignee_email = assignee_doc.get("email") if assignee_doc else None
+            assignee_name = (assignee_doc.get("fullName") or assignee_doc.get("userName", "Student")) if assignee_doc else "Student"
+
+            if zepto_token:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        # Email to assignee
+                        if assignee_email:
+                            await client.post(
+                                "https://api.zeptomail.in/v1.1/email/template",
+                                json={
+                                    "from": {"address": "support@alumnx.com", "name": "Alumnx AI Labs"},
+                                    "to": [{"email_address": {"address": assignee_email, "name": assignee_name}}],
+                                    "template_key": "2518b.6d1e43aa616e32a8.k1.f80371c0-025f-11f1-9250-ae9c7e0b6a9f.19c2c97aadc",
+                                    "merge_info": {"date": current_date, "name": assignee_name, "agent_message": f"The task '{task_title}' assigned to you has been deleted by {deleter_name}."}
+                                },
+                                headers={"accept": "application/json", "content-type": "application/json", "authorization": zepto_token},
+                                timeout=10.0
+                            )
+                        # Email to assigner (User1) if different from deleter
+                        if target.get("assignerEmail") and target["assignerEmail"] != deleter_email:
+                            await client.post(
+                                "https://api.zeptomail.in/v1.1/email/template",
+                                json={
+                                    "from": {"address": "support@alumnx.com", "name": "Alumnx AI Labs"},
+                                    "to": [{"email_address": {"address": target["assignerEmail"], "name": target["assignerName"]}}],
+                                    "template_key": "2518b.6d1e43aa616e32a8.k1.f80371c0-025f-11f1-9250-ae9c7e0b6a9f.19c2c97aadc",
+                                    "merge_info": {"date": current_date, "name": target["assignerName"], "agent_message": f"The task '{task_title}' that you assigned to {assignee_name} has been deleted by {deleter_name}."}
+                                },
+                                headers={"accept": "application/json", "content-type": "application/json", "authorization": zepto_token},
+                                timeout=10.0
+                            )
+                except Exception as e:
+                    print(f"⚠️ Delete notification email failed: {e}")
+
+        return {"status": "success", "message": "Task deleted and removed from all assignments"}
+    else:
+        raise HTTPException(status_code=403, detail="Only the creator can delete this task.")
 
 @router.delete("/task/user-task/{user_id}/unassign/{task_id}", status_code=200)
 async def unassign_user_from_task(request: Request, user_id: str, task_id: str):
@@ -558,60 +610,76 @@ async def unassign_user_from_task(request: Request, user_id: str, task_id: str):
     
     return {"status": "success", "message": "Task removed from user assignments"}
 
-
 @router.put("/user-tasks/{user_id}/{task_id}/complete", status_code=200)
 async def mark_task_complete(request: Request, user_id: str, task_id: str):
-    """
-    Mark a task as completed for a user and trigger an agent proactive message.
-    """
     db = request.app.state.db
-    
-    # 1. Update task status
+
+    # 1. Fetch assignment BEFORE marking complete to get assignerDetails
+    assignment_doc = await db.assignments.find_one({"userId": user_id, "tasks.taskId": task_id})
+    task_assignment = None
+    if assignment_doc:
+        for t in assignment_doc.get("tasks", []):
+            if t.get("taskId") == task_id:
+                task_assignment = t
+                break
+
+    # 2. Mark complete (existing logic)
     result = await db.assignments.update_one(
         {"userId": user_id, "tasks.taskId": task_id},
-        {
-            "$set": {
-                "tasks.$.taskStatus": "completed",
-                "tasks.$.completionDate": datetime.now().isoformat()
-            }
-        }
+        {"$set": {"tasks.$.taskStatus": "completed", "tasks.$.completionDate": datetime.now().isoformat()}}
     )
-    
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Task assignment not found")
-    
-    # 2. Get task details for the message
+
+    # 3. Get task title
     task = await db.tasks.find_one({"_id": ObjectId(task_id)})
-    if task:
-        task_name = task.get("name") or task.get("title") or "the task"
-    else:
-        task_name = "the task"
-    
-    # 3. Get agent name
+    task_name = task.get("name") or task.get("title", "the task") if task else "the task"
+
+    # 4. Get assignee (User2) name
+    assignee_doc = None
+    if ObjectId.is_valid(user_id):
+        if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+            assignee_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(user_id)})
+        if not assignee_doc:
+            assignee_doc = await db.users.find_one({"_id": ObjectId(user_id)})
+    assignee_name = (assignee_doc.get("fullName") or assignee_doc.get("userName", "The user")) if assignee_doc else "The user"
+
+    # 5. Send email to assigner (User1) if assignerEmail is stored
+    if task_assignment and task_assignment.get("assignerEmail"):
+        assigner_email = task_assignment["assignerEmail"]
+        assigner_name = task_assignment.get("assignerName", "Admin")
+        current_date = datetime.now().strftime("%d %b %Y")
+        zepto_payload = {
+            "from": {"address": "support@alumnx.com", "name": "Alumnx AI Labs"},
+            "to": [{"email_address": {"address": assigner_email, "name": assigner_name}}],
+            "template_key": "2518b.6d1e43aa616e32a8.k1.f80371c0-025f-11f1-9250-ae9c7e0b6a9f.19c2c97aadc",
+            "merge_info": {
+                "date": current_date,
+                "name": assigner_name,
+                "agent_message": f"{assignee_name} has completed the task '{task_name}' assigned by you."
+            }
+        }
+        zepto_token = os.getenv("ZEPTO_MAIL_TOKEN")
+        if zepto_token:
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        "https://api.zeptomail.in/v1.1/email/template",
+                        json=zepto_payload,
+                        headers={"accept": "application/json", "content-type": "application/json", "authorization": zepto_token},
+                        timeout=10.0
+                    )
+                print(f"✅ Completion email sent to assigner {assigner_email}")
+            except Exception as e:
+                print(f"⚠️ Email to assigner failed: {e}")
+
+    # 6. Existing proactive agent message (keep as is)
     agent_doc = await db.agents.find_one({"userId": user_id})
     agent_name = agent_doc.get("agentName", "Study Buddy") if agent_doc else "Study Buddy"
-    
-    # 4. Insert proactive message into chats
-    # Check if a completion message was already sent recently to avoid duplicates if user toggles
     proactive_message = f"Great! You've completed '{task_name}'. Shall I assign the next task, or would you like to shift your learning preferences?"
-    
-    chat_doc = {
-        "userId": user_id,
-        "userType": "agent",
-        "message": proactive_message,
-        "timestamp": datetime.now()
-    }
-    await db.chats.insert_one(chat_doc)
-    
-    print(f"🤖 [AGENT] Proactive message added for user {user_id} after completing {task_name}")
-    
-    
-    return {
-        "status": "success", 
-        "message": "Task marked as complete",
-        "agentResponse": proactive_message
-    }
+    await db.chats.insert_one({"userId": user_id, "userType": "agent", "message": proactive_message, "timestamp": datetime.now()})
 
+    return {"status": "success", "message": "Task marked as complete", "agentResponse": proactive_message}
 
 @router.put("/user-tasks/{user_id}/{task_id}/comment", status_code=200)
 async def add_comment_to_task(
