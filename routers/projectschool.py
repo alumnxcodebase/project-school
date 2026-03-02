@@ -144,17 +144,34 @@ async def reports_login(request: Request, login_data: LoginRequest = Body(...)):
         raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
 
 @router.get("/projects", status_code=200)
-async def get_all_projects_list(request: Request):
+async def get_all_projects_list(request: Request, userId: Optional[str] = None):
     """
-    Fetch all projects from Agriculture DB
+    Fetch all projects from Agriculture DB with privacy filtering
     """
     db = request.app.state.db
+    
+    # Visibility logic
+    ADMIN_ID = "6928870c5b168f52cf8bd77a"
+    admin_creators = [None, "admin", ADMIN_ID]
+    
+    if userId:
+        query = {
+            "$or": [
+                {"createdBy": {"$in": admin_creators}},
+                {"createdBy": userId}
+            ]
+        }
+    else:
+        # If no user context, only show public/admin projects
+        query = {"createdBy": {"$in": admin_creators}}
+        
+    print(f"🔍 Fetching project list for dashboard with query: {query}")
     # Projects are in the Agriculture DB
-    cursor = db.projects.find({}, {"_id": 1, "name": 1, "description": 1, "projectType": 1, "status": 1})
+    cursor = db.projects.find(query, {"_id": 1, "name": 1, "description": 1, "projectType": 1, "status": 1})
     projects = []
     async for doc in cursor:
         projects.append(serialize(doc))
-    print(f"✅ Returning {len(projects)} projects")
+    print(f"✅ Returning {len(projects)} filtered projects")
     return projects
 
 @router.get("/get-cohort-members", status_code=200)
@@ -378,30 +395,38 @@ async def complete_user_task_proxy(request: Request, body: Dict[str, Any] = Body
         }}
     )
     return {"status": "success"}
-
 @router.post("/tasks/link-user-task", status_code=200)
 async def link_task_to_user_proxy(request: Request, body: Dict[str, Any] = Body(...)):
-    """
-    Proxy to Link a task to a user (compatible with frontend path)
-    """
     db = request.app.state.db
     user_id = body.get("userId")
     task_id = body.get("taskId")
     assigned_by = body.get("assignedBy", "admin")
-    
+    assigner_user_id = body.get("assignerUserId", "")
+    assigner_name = body.get("assignerName", "Admin")
+    assigner_email = body.get("assignerEmail", "")
+
+    # Fetch assigner email from DB using assignerUserId
+    assigner_doc = None
+    if assigner_user_id and ObjectId.is_valid(assigner_user_id):
+        if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+            assigner_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(assigner_user_id)})
+        if not assigner_doc:
+            assigner_doc = await db.users.find_one({"_id": ObjectId(assigner_user_id)})
+        if assigner_doc:
+            assigner_email = assigner_doc.get("email", "")
+            assigner_name = assigner_doc.get("fullName") or assigner_doc.get("userName", assigner_name)
     if not user_id or not task_id:
         raise HTTPException(status_code=400, detail="userId and taskId are required")
-        
-    # Check if already assigned
-    existing = await db.assignments.find_one({
-        "userId": user_id,
-        "tasks.taskId": task_id
-    })
-    
+
+    existing = await db.assignments.find_one({"userId": user_id, "tasks.taskId": task_id})
+
     if not existing:
         new_link = {
             "taskId": task_id,
             "assignedBy": assigned_by,
+            "assignerUserId": assigner_user_id,    # NEW
+            "assignerName": assigner_name,          # NEW
+            "assignerEmail": assigner_email,        # NEW
             "sequenceId": body.get("sequenceId"),
             "taskStatus": "active" if assigned_by == "admin" else "pending",
             "comments": []
@@ -411,6 +436,51 @@ async def link_task_to_user_proxy(request: Request, body: Dict[str, Any] = Body(
             {"$push": {"tasks": new_link}},
             upsert=True
         )
+
+        # Get task title
+        task_doc = await db.tasks.find_one({"_id": ObjectId(task_id)}) if ObjectId.is_valid(task_id) else None
+        task_title = task_doc.get("title", "a task") if task_doc else "a task"
+
+        # Get assignee details for email
+        assignee_doc = None
+        if ObjectId.is_valid(user_id):
+            if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+                assignee_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(user_id)})
+            if not assignee_doc:
+                assignee_doc = await db.users.find_one({"_id": ObjectId(user_id)})
+
+        assignee_email = assignee_doc.get("email") if assignee_doc else None
+        assignee_name = (assignee_doc.get("fullName") or assignee_doc.get("userName", "Student")) if assignee_doc else "Student"
+
+        # Send email to assignee (User2)
+        if assignee_email:
+            from datetime import datetime as dt
+            current_date = dt.now().strftime("%d %b %Y")
+            zepto_payload = {
+                "from": {"address": "support@alumnx.com", "name": "Alumnx AI Labs"},
+                "to": [{"email_address": {"address": assignee_email, "name": assignee_name}}],
+                "template_key": "2518b.6d1e43aa616e32a8.k1.f80371c0-025f-11f1-9250-ae9c7e0b6a9f.19c2c97aadc",
+                "merge_info": {
+                    "date": current_date,
+                    "name": assignee_name,
+                    "agent_message": f"{assigner_name} has assigned you a task: '{task_title}'. Please login to complete it."
+                }
+            }
+            import os, httpx
+            zepto_token = os.getenv("ZEPTO_MAIL_TOKEN")
+            if zepto_token:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        await client.post(
+                            "https://api.zeptomail.in/v1.1/email/template",
+                            json=zepto_payload,
+                            headers={"accept": "application/json", "content-type": "application/json", "authorization": zepto_token},
+                            timeout=10.0
+                        )
+                    print(f"✅ Assignment email sent to {assignee_email}")
+                except Exception as e:
+                    print(f"⚠️ Email failed: {e}")
+
     return {"status": "success"}
 
 @router.put("/tasks/user-tasks/{user_id}/{task_id}/active", status_code=200)
