@@ -142,135 +142,66 @@ def validate_response(expected: Any, actual: Any) -> bool:
     
     return str(expected) == str(actual)
 
-@router.post("/run", response_model=AssessmentSubmission)
+@router.post("/run")
 async def run_assessment(
     eval_request: RunAssessmentRequest,
+    request: Request,
     db: AsyncIOMotorDatabase = Depends(get_db)
-    # verify_token dependency would normally go here to get userId
 ):
-    # Retrieve User ID from request header (set by frontend/auth middleware) for now, or mock it
-    # in a real implementation, we'd extract from JWT.
-    # For this implementation, we'll accept a header or assume a test user if not present.
-    user_id = "test_user_id" # Replace with actual user extraction logic
+    """
+    Captures manual review submissions.
+    Stores the student URL and metadata instead of running automated tests.
+    """
+    # Extract user info from request state (populated by verify_api_key)
+    # OR from the request body if sent explicitly
+    user_id = eval_request.userId or getattr(request.state, "userId", "unknown_user")
+    user_name = eval_request.userName or getattr(request.state, "userName", "Unknown User")
     
-    # Load config (awaitable now)
-    config = await load_assessment_config(eval_request.taskId, db)
+    # Create submission record
+    submission_data = {
+        "userId": user_id,
+        "userName": user_name,
+        "taskId": eval_request.taskId,
+        "submittedUrl": eval_request.studentUrl,
+        "submittedAt": datetime.now(),
+        "status": "pending_review"
+    }
     
-    test_cases = config.get("test_cases", [])
-    
-    # Get base URL from request, but allow test cases to append paths
-    base_student_url = eval_request.studentUrl.rstrip('/')
-    
-    results = []
-    passed_count = 0
-    
-    async with httpx.AsyncClient() as client:
-        for test_case in test_cases:
-            start_time = time.time()
-            result_detail = TestResultDetails(
-                test_case_id=test_case["id"],
-                description=test_case["description"],
-                status="pending",
-                input=test_case["input"],
-                expected_output=test_case["expected_output"],
-                execution_time_ms=0
-            )
-            
-            try:
-                # Prepare request parameters
-                method = test_case.get("method", "POST").upper()
-                expected_status = test_case.get("expected_status", 200)
-                
-                # Build final URL (e.g. http://localhost:3000/products/1)
-                relative_path = test_case.get("path", "").lstrip('/')
-                target_url = f"{base_student_url}/{relative_path}" if relative_path else base_student_url
-                
-                # Execute based on method
-                if method == "GET":
-                    response = await client.get(target_url, timeout=10.0)
-                elif method == "PUT":
-                    response = await client.put(target_url, json=test_case.get("input"), timeout=10.0)
-                elif method == "DELETE":
-                    response = await client.delete(target_url, timeout=10.0)
-                else: # Default to POST
-                    response = await client.post(target_url, json=test_case.get("input"), timeout=10.0)
-                
-                execution_time = (time.time() - start_time) * 1000
-                result_detail.execution_time_ms = round(execution_time, 2)
-                
-                # Parse output
-                try:
-                    actual_output = response.json()
-                    # Unwrap FastAPI detail if present and we're expecting an error
-                    if expected_status != 200 and isinstance(actual_output, dict) and "detail" in actual_output:
-                        actual_output = actual_output["detail"]
-                except:
-                    actual_output = response.text
-                
-                result_detail.actual_output = actual_output
-                
-                # Validate status code first
-                if response.status_code == expected_status:
-                    # Then validate body
-                    if validate_response(test_case["expected_output"], actual_output):
-                        result_detail.status = "passed"
-                        passed_count += 1
-                    else:
-                        result_detail.status = "failed"
-                        result_detail.error_message = f"Body mismatch. Expected subset {test_case['expected_output']}, got {actual_output}"
-                else:
-                    result_detail.status = "failed"
-                    result_detail.error_message = f"Status code mismatch. Expected {expected_status}, got {response.status_code}. Response: {actual_output}"
-                    
-            except httpx.RequestError as e:
-                result_detail.status = "error"
-                result_detail.error_message = f"Connection error: {str(e)}"
-                result_detail.execution_time_ms = round((time.time() - start_time) * 1000, 2)
-            except Exception as e:
-                result_detail.status = "error"
-                result_detail.error_message = f"Unexpected error: {str(e)}"
-                result_detail.execution_time_ms = round((time.time() - start_time) * 1000, 2)
-            
-            results.append(result_detail)
-    
-    overall_status = "passed" if passed_count == len(test_cases) else "failed"
-    score = int((passed_count / len(test_cases)) * 100) if test_cases else 0
-    
-    submission = AssessmentSubmission(
-        userId=user_id,
-        taskId=eval_request.taskId,
-        endpoint_url=eval_request.studentUrl,
-        status=overall_status,
-        score=score,
-        total_tests=len(test_cases),
-        passed_tests=passed_count,
-        results=results
-    )
-    
-    # Save to DB - Grouped by User and Task
-    # Upsert into assessment_progress collection
-    await db.assessment_progress.update_one(
-        {"userId": user_id, "taskId": eval_request.taskId},
-        {
-            "$push": {"history": submission.model_dump(by_alias=True, exclude={"id"})},
-            "$set": {"last_updated": datetime.now()}
-        },
-        upsert=True
-    )
-    
-    # Also save to the individual submissions collection for audit/backup if needed, 
-    # but for this requirement we mainly want the grouped view. 
-    # Validating if we still need the individual insert... user said "instead of storing again and again... store results for same user"
-    # So we can probably skip the individual insert or keep it as a log.
-    # I'll keep it commented out to strictly follow "instead of" guidance, or just remove it.
-    # await db.assessment_submissions.insert_one(submission.model_dump(by_alias=True, exclude={"id"}))
-    
-    # If passed, update the user's task status to completed
-    if overall_status == "passed":
-        # Check assignments
-        pass # Implement logic to mark assignment as completed
+    # Store in task_submissions collection
+    try:
+        await db.task_submissions.insert_one(submission_data)
+        
+        # Also update assessment_progress for consistency with UI if needed
+        # We can store a minimal "manual" entry in history
+        history_entry = {
+            "userId": user_id,
+            "taskId": eval_request.taskId,
+            "endpoint_url": eval_request.studentUrl,
+            "status": "submitted",
+            "score": 0,
+            "total_tests": 0,
+            "passed_tests": 0,
+            "timestamp": datetime.now(),
+            "message": "Manual submission for review"
+        }
+        
+        await db.assessment_progress.update_one(
+            {"userId": user_id, "taskId": eval_request.taskId},
+            {
+                "$push": {"history": history_entry},
+                "$set": {"last_updated": datetime.now()}
+            },
+            upsert=True
+        )
+        
+    except Exception as e:
+        print(f"Error saving submission: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save submission")
 
-    return submission
+    return {
+        "status": "success",
+        "message": "Thank you for submitting we will review it and let you know"
+    }
 
 @router.get("/history/{task_id}/{user_id}")
 async def get_assessment_history(

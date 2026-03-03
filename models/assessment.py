@@ -36,6 +36,8 @@ class AssessmentSubmission(BaseModel):
 class RunAssessmentRequest(BaseModel):
     taskId: str
     studentUrl: str
+    userId: Optional[str] = None
+    userName: Optional[str] = None
 
 class AssessmentProgress(BaseModel):
     model_config = ConfigDict(populate_by_name=True, json_encoders={ObjectId: str})
