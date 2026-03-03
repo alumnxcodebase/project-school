@@ -71,7 +71,33 @@ class BroadcastTaskRequest(BaseModel):
     adminEmail: Optional[str] = None
     userIds: List[str]
 
+class SendJobsEmailRequest(BaseModel):
+    collegeId: Optional[str] = None
+    allColleges: bool = False
+    templateId: Optional[str] = None
+    jobShortCodes: str # CSV string
+
 # --- Endpoints ---
+
+@router.get("/colleges/get", status_code=200)
+async def get_colleges(request: Request):
+    """
+    Fetch all colleges from the main database.
+    """
+    if not hasattr(request.app.state, 'main_db') or request.app.state.main_db is None:
+        raise HTTPException(status_code=503, detail="Main Database not available")
+    
+    db = request.app.state.main_db
+    cursor = db.colleges.find({}, {"name": 1, "collegeName": 1, "_id": 1})
+    colleges = []
+    async for doc in cursor:
+        college = serialize(doc)
+        # Compatibility mapping for frontend
+        if "collegeName" not in college and "name" in college:
+            college["collegeName"] = college["name"]
+        colleges.append(college)
+    
+    return colleges
 
 @router.post("/reports-login", status_code=200)
 async def reports_login(request: Request, login_data: LoginRequest = Body(...)):
@@ -727,3 +753,119 @@ async def log_activity(request: Request, body: Dict[str, Any] = Body(...)):
     )
     
     return {"status": "success", "earned": xp_earned}
+
+@router.post("/send-jobs-email", status_code=200)
+async def send_jobs_email(request: Request, body: SendJobsEmailRequest = Body(...)):
+    """
+    Sends job digest email to users of specific college or all colleges.
+    Fetches job details by shortcodes.
+    """
+    if not hasattr(request.app.state, 'main_db') or request.app.state.main_db is None:
+        raise HTTPException(status_code=503, detail="Main Database not available")
+    
+    db = request.app.state.main_db
+    zepto_token = os.getenv("ZEPTO_MAIL_TOKEN")
+    
+    if not zepto_token:
+        raise HTTPException(status_code=500, detail="ZEPTO_MAIL_TOKEN not configured")
+
+    # 1. Process Job Shortcodes
+    short_codes = [sc.strip() for sc in body.jobShortCodes.split(",") if sc.strip()]
+    if not short_codes:
+        raise HTTPException(status_code=400, detail="No job shortcodes provided")
+
+    cursor = db.jobposts.find({"shortCode": {"$in": short_codes}})
+    jobs = []
+    async for doc in cursor:
+        jobs.append(doc)
+    
+    if not jobs:
+        raise HTTPException(status_code=404, detail="No jobs found for the provided shortcodes")
+
+    # 2. Format Job List HTML
+    jobs_html = "<ul>"
+    for job in jobs:
+        title = job.get("jobTitle") or job.get("title") or "Untitled Job"
+        # Preference: registrationLink > applyLink > sourceUrl
+        link = job.get("registrationLink") or job.get("applyLink") or job.get("sourceUrl")
+        
+        if link:
+            # Basic validation/cleanup for link
+            if not link.startswith("http"):
+                link = "https://" + link
+            jobs_html += f"<li><strong>{title}</strong>: <a href='{link}'>Apply Here</a></li>"
+        else:
+            jobs_html += f"<li><strong>{title}</strong></li>"
+    jobs_html += "</ul>"
+
+    # 3. Identify Target Users
+    user_query = {"email": {"$exists": True, "$ne": ""}}
+    if not body.allColleges and body.collegeId:
+        if ObjectId.is_valid(body.collegeId):
+            user_query["collegeId"] = ObjectId(body.collegeId)
+        else:
+            # Try string match if not a valid ObjectId (some systems store as strings)
+            user_query["collegeId"] = body.collegeId
+
+    user_cursor = db.users.find(user_query, {"email": 1, "fullName": 1, "userName": 1})
+    target_users = []
+    async for u in user_cursor:
+        target_users.append({
+            "email": u.get("email"),
+            "name": u.get("fullName") or u.get("userName") or "Alumnus"
+        })
+
+    if not target_users:
+        return {"status": "success", "message": "No users found for the selected criteria", "sentCount": 0}
+
+    # 4. Dispatch Emails via ZeptoMail (Batched for efficiency if many users)
+    # ZeptoMail supports multiple recipients in one call, but let's keep it simple or follow existing helper patterns.
+    # Existing helpers send one by one. For thousands of users, we should ideally use ZeptoMail's batching.
+    # But for now, let's implement a robust loop.
+    
+    template_key = body.templateId or "2518b.6d1e43aa616e32a8.k1.f80371c0-025f-11f1-9250-ae9c7e0b6a9f.19c2c97aadc"
+    current_date = datetime.now().strftime("%d %b %Y")
+    
+    success_count = 0
+    failed_count = 0
+    
+    async with httpx.AsyncClient() as client:
+        for user in target_users:
+            zepto_payload = {
+                "from": {"address": "support@alumnx.com", "name": "Alumnx AI Labs"},
+                "to": [{"email_address": {"address": user["email"], "name": user["name"]}}],
+                "template_key": template_key,
+                "merge_info": {
+                    "date": current_date,
+                    "name": user["name"],
+                    "message": jobs_html # This will be injected into {{message}}
+                }
+            }
+            
+            try:
+                response = await client.post(
+                    "https://api.zeptomail.in/v1.1/email/template",
+                    json=zepto_payload,
+                    headers={
+                        "accept": "application/json",
+                        "content-type": "application/json",
+                        "authorization": zepto_token
+                    },
+                    timeout=10.0
+                )
+                if 200 <= response.status_code < 300:
+                    success_count += 1
+                else:
+                    failed_count += 1
+                    logger.error(f"❌ ZeptoMail error for {user['email']}: {response.text}")
+            except Exception as e:
+                failed_count += 1
+                logger.error(f"⚠️ Failed to send job email to {user['email']}: {e}")
+
+    return {
+        "status": "success",
+        "totalUsers": len(target_users),
+        "successCount": success_count,
+        "failedCount": failed_count,
+        "jobsProcessed": len(jobs)
+    }
