@@ -25,17 +25,15 @@ class BulkTaskAssignment(BaseModel):
 
 class BulkAssignTasksRequest(BaseModel):
     userId: str
+    adminId: Optional[str] = None
+    adminName: Optional[str] = None
+    adminEmail: Optional[str] = None
     tasks: List[BulkTaskAssignment]
 
 router = APIRouter()
 
 
-def serialize(doc):
-    """Helper to convert MongoDB _id to string id"""
-    if not doc:
-        return None
-    doc["id"] = str(doc.pop("_id"))
-    return doc
+from utils.helpers import serialize, send_task_completion_email, send_assignment_email, notify_task_deletion
 
 @router.get("/")
 async def get_all_tasks(request: Request, project_id: str = None, userId: str = None):
@@ -109,8 +107,23 @@ async def create_task(request: Request, task: Task = Body(...)):
 
     if skill_type and auto_assign and (creator in admin_creators):
         print(f"🔄 [AUTO-ASSIGN] Triggered for task '{task_dict.get('title')}' ({skill_type})")
-        print(f"🔄 Checking preferences for auto-assigning task {task_id_str} ({skill_type})")
         
+        # Determine assigner info for notifications
+        admin_id = creator if (creator and ObjectId.is_valid(creator)) else "admin"
+        admin_name = "Admin"
+        admin_email = ""
+        
+        if admin_id != "admin":
+            admin_doc = None
+            if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+                admin_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(admin_id)})
+            if not admin_doc:
+                admin_doc = await db.users.find_one({"_id": ObjectId(admin_id)})
+            
+            if admin_doc:
+                admin_email = admin_doc.get("email", "")
+                admin_name = admin_doc.get("fullName") or admin_doc.get("userName") or "Admin"
+
         # Query for users with preferences containing "All" or the specific skillType
         matching_prefs_cursor = db.preferences.find({
             "preferences": {"$in": ["All", skill_type]}
@@ -122,17 +135,13 @@ async def create_task(request: Request, task: Task = Body(...)):
             user_id = pref_doc["userId"]
             
             # --- Duplicate Prevention Check ---
-            # Check if user already has this specific task ID OR a task with identical content
             assignment = await db.assignments.find_one({"userId": user_id})
             if assignment and assignment.get("tasks"):
                 assigned_task_ids = [ObjectId(t["taskId"]) for t in assignment.get("tasks") if ObjectId.is_valid(t.get("taskId"))]
                 
-                # Check for exact taskId match first (fast)
                 if task_id_str in [str(tid) for tid in assigned_task_ids]:
-                    print(f"⏭️ Skipping user {user_id} - Task ID {task_id_str} already assigned")
                     continue
                     
-                # Check for content match (Title, Description, SkillType)
                 assigned_details = await db.tasks.find({"_id": {"$in": assigned_task_ids}}).to_list(length=None)
                 is_content_duplicate = False
                 for existing_task in assigned_details:
@@ -143,16 +152,17 @@ async def create_task(request: Request, task: Task = Body(...)):
                         break
                 
                 if is_content_duplicate:
-                    print(f"⏭️ Skipping user {user_id} - task with same content already assigned")
                     continue
-            # ----------------------------------
             
             # Create the task assignment object
             new_assignment_data = TaskAssignment(
                 taskId=task_id_str,
-                assignedBy="admin", # System auto-assign
-                sequenceId=None, # No specific sequence
-                taskStatus="active", # Mark as active immediately as per requirement
+                assignedBy="admin",
+                assignerUserId=admin_id,
+                assignerName=admin_name,
+                assignerEmail=admin_email,
+                sequenceId=None,
+                taskStatus="active",
                 expectedCompletionDate=None
             ).model_dump()
             
@@ -174,8 +184,23 @@ async def create_task(request: Request, task: Task = Body(...)):
                 },
                 upsert=True
             )
+            
+            # Notify assignee (User2)
+            assignee_doc = None
+            if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+                assignee_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(user_id)})
+            if not assignee_doc:
+                assignee_doc = await db.users.find_one({"_id": ObjectId(user_id)})
+            
+            if assignee_doc and assignee_doc.get("email"):
+                await send_assignment_email(
+                    assignee_doc["email"],
+                    assignee_doc.get("fullName") or assignee_doc.get("userName", "Student"),
+                    admin_name,
+                    task_dict.get("title", "a task")
+                )
+
             assigned_count += 1
-            print(f"✅ [AUTO-ASSIGN] Linked task {task_id_str} to user {user_id}")
             
         print(f"🏁 [AUTO-ASSIGN] Completed: Task {task_id_str} assigned to {assigned_count} users")
     else:
@@ -223,14 +248,12 @@ async def update_task(request: Request, task_id: str, task_update: TaskUpdate = 
     return task
 
 
-@router.delete("/{task_id}", status_code=204)
+@router.delete("/{task_id}", status_code=200)
 async def delete_task(request: Request, task_id: str):
-    """Delete a task"""
-    db = request.app.state.db
-    result = await db.tasks.delete_one({"_id": ObjectId(task_id)})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return None
+    """Delete a task (System/Admin move)"""
+    # Simply call the unified deletion logic with a system 'admin' ID or similar
+    # For now, let's just make it call the main deletion function logic
+    return await delete_task_and_assignments(request, "admin", task_id)
 
 
 @router.put("/{task_id}/user/{user_id}")
@@ -264,25 +287,11 @@ async def update_user_created_task(request: Request, task_id: str, user_id: str,
     return task
 
 
-@router.delete("/{task_id}/user/{user_id}", status_code=204)
+@router.delete("/{task_id}/user/{user_id}", status_code=200)
 async def delete_user_created_task(request: Request, task_id: str, user_id: str):
     """Delete a task only if created by the specified user"""
-    db = request.app.state.db
-    
-    result = await db.tasks.delete_one({
-        "_id": ObjectId(task_id),
-        "createdBy": user_id
-    })
-    
-    if result.deleted_count == 0:
-        # Check if task exists to return appropriate error
-        task = await db.tasks.find_one({"_id": ObjectId(task_id)})
-        if not task:
-             raise HTTPException(status_code=404, detail="Task not found")
-        if task.get("createdBy") != user_id:
-             raise HTTPException(status_code=403, detail="User not authorized to delete this task")
-             
-    return None
+    # Delegate to unified deletion logic
+    return await delete_task_and_assignments(request, user_id, task_id)
 
 
 @router.post("/link-user-task", status_code=200)
@@ -323,12 +332,29 @@ async def link_task_to_user(request: Request, link: UserTaskLink = Body(...)):
     # If admin assigns, we NO LONGER force isEnabled: True globally.
     # Visibility is now controlled by the assignment itself.
 
+    admin_id = link.assignerUserId or "admin"
+    admin_name = link.assignerName or "Admin"
+    admin_email = link.assignerEmail or ""
+
+    # Fetch admin details if missing
+    if admin_id != "admin" and (not admin_email or admin_name == "Admin"):
+        admin_doc = None
+        if admin_id and ObjectId.is_valid(admin_id):
+            if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+                admin_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(admin_id)})
+            if not admin_doc:
+                admin_doc = await db.users.find_one({"_id": ObjectId(admin_id)})
+            
+            if admin_doc:
+                admin_email = admin_doc.get("email", admin_email)
+                admin_name = admin_doc.get("fullName") or admin_doc.get("userName") or admin_name
+
     new_task_assignment = TaskAssignment(
         taskId=link.taskId,
         assignedBy=link.assignedBy,
-        assignerUserId=link.assignerUserId,
-        assignerName=link.assignerName,
-        assignerEmail=link.assignerEmail,
+        assignerUserId=admin_id,
+        assignerName=admin_name,
+        assignerEmail=admin_email,
         sequenceId=link.sequenceId,
         taskStatus=task_status,
         expectedCompletionDate=link.expectedCompletionDate
@@ -346,6 +372,21 @@ async def link_task_to_user(request: Request, link: UserTaskLink = Body(...)):
         upsert=True
     )
     
+    # Notify assignee
+    assignee_doc = None
+    if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+        assignee_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(link.userId)})
+    if not assignee_doc:
+        assignee_doc = await db.users.find_one({"_id": ObjectId(link.userId)})
+    
+    if assignee_doc and assignee_doc.get("email"):
+        await send_assignment_email(
+            assignee_doc["email"],
+            assignee_doc.get("fullName") or assignee_doc.get("userName", "Student"),
+            admin_name,
+            task_doc.get("title", "a task")
+        )
+
     return {"status": "success", "message": "Task assigned to user"}
 
 
@@ -513,84 +554,49 @@ async def delete_task_and_assignments(request: Request, user_id: str, task_id: s
         raise HTTPException(status_code=404, detail="Task not found")
     task_title = task.get("title", "a task")
 
-    if task.get("createdBy") == user_id:
+    # Permission check: Either admin or the creator
+    if user_id != "admin" and task.get("createdBy") != user_id:
+        raise HTTPException(status_code=403, detail="Only the creator or admin can delete this task.")
 
-        # Collect all assignees and their assigner details BEFORE deleting
-        affected = await db.assignments.find({"tasks.taskId": task_id}).to_list(length=None)
-        email_targets = []
-        for doc in affected:
-            for t in doc.get("tasks", []):
-                if t.get("taskId") == task_id:
-                    email_targets.append({
-                        "assigneeUserId": doc["userId"],
-                        "assignerEmail": t.get("assignerEmail"),
-                        "assignerName": t.get("assignerName", "Admin")
-                    })
-
-        # Delete task and assignments
-        await db.tasks.delete_one({"_id": ObjectId(task_id)})
-        await db.assignments.update_many({"tasks.taskId": task_id}, {"$pull": {"tasks": {"taskId": task_id}}})
-
-        # Send emails
-        zepto_token = os.getenv("ZEPTO_MAIL_TOKEN")
-        current_date = datetime.now().strftime("%d %b %Y")
-
-        # Get deleter details
-        deleter_doc = None
-        if ObjectId.is_valid(user_id):
-            if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
-                deleter_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(user_id)})
-            if not deleter_doc:
-                deleter_doc = await db.users.find_one({"_id": ObjectId(user_id)})
-        deleter_name = (deleter_doc.get("fullName") or deleter_doc.get("userName", "A user")) if deleter_doc else "A user"
-        deleter_email = deleter_doc.get("email") if deleter_doc else None
-
-        for target in email_targets:
-            # Email to assignee (User2)
-            assignee_doc = None
-            if ObjectId.is_valid(target["assigneeUserId"]):
+    # Collect all assignees and their assigner details BEFORE deleting
+    affected = await db.assignments.find({"tasks.taskId": task_id}).to_list(length=None)
+    deletion_targets = []
+    for doc in affected:
+        for t in doc.get("tasks", []):
+            if t.get("taskId") == task_id:
+                # Get assignee name (User2)
+                assignee_doc = None
                 if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
-                    assignee_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(target["assigneeUserId"])})
+                    assignee_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(doc["userId"])})
                 if not assignee_doc:
-                    assignee_doc = await db.users.find_one({"_id": ObjectId(target["assigneeUserId"])})
-            assignee_email = assignee_doc.get("email") if assignee_doc else None
-            assignee_name = (assignee_doc.get("fullName") or assignee_doc.get("userName", "Student")) if assignee_doc else "Student"
+                    assignee_doc = await db.users.find_one({"_id": ObjectId(doc["userId"])})
+                
+                deletion_targets.append({
+                    "assignee_email": assignee_doc.get("email") if assignee_doc else None,
+                    "assignee_name": (assignee_doc.get("fullName") or assignee_doc.get("userName", "Student")) if assignee_doc else "Student",
+                    "assigner_email": t.get("assignerEmail"),
+                    "assigner_name": t.get("assignerName", "Admin")
+                })
 
-            if zepto_token:
-                try:
-                    async with httpx.AsyncClient() as client:
-                        # Email to assignee
-                        if assignee_email:
-                            await client.post(
-                                "https://api.zeptomail.in/v1.1/email/template",
-                                json={
-                                    "from": {"address": "support@alumnx.com", "name": "Alumnx AI Labs"},
-                                    "to": [{"email_address": {"address": assignee_email, "name": assignee_name}}],
-                                    "template_key": "2518b.6d1e43aa616e32a8.k1.f80371c0-025f-11f1-9250-ae9c7e0b6a9f.19c2c97aadc",
-                                    "merge_info": {"date": current_date, "name": assignee_name, "agent_message": f"The task '{task_title}' assigned to you has been deleted by {deleter_name}."}
-                                },
-                                headers={"accept": "application/json", "content-type": "application/json", "authorization": zepto_token},
-                                timeout=10.0
-                            )
-                        # Email to assigner (User1) if different from deleter
-                        if target.get("assignerEmail") and target["assignerEmail"] != deleter_email:
-                            await client.post(
-                                "https://api.zeptomail.in/v1.1/email/template",
-                                json={
-                                    "from": {"address": "support@alumnx.com", "name": "Alumnx AI Labs"},
-                                    "to": [{"email_address": {"address": target["assignerEmail"], "name": target["assignerName"]}}],
-                                    "template_key": "2518b.6d1e43aa616e32a8.k1.f80371c0-025f-11f1-9250-ae9c7e0b6a9f.19c2c97aadc",
-                                    "merge_info": {"date": current_date, "name": target["assignerName"], "agent_message": f"The task '{task_title}' that you assigned to {assignee_name} has been deleted by {deleter_name}."}
-                                },
-                                headers={"accept": "application/json", "content-type": "application/json", "authorization": zepto_token},
-                                timeout=10.0
-                            )
-                except Exception as e:
-                    print(f"⚠️ Delete notification email failed: {e}")
+    # Delete task and assignments
+    await db.tasks.delete_one({"_id": ObjectId(task_id)})
+    await db.assignments.update_many({"tasks.taskId": task_id}, {"$pull": {"tasks": {"taskId": task_id}}})
 
-        return {"status": "success", "message": "Task deleted and removed from all assignments"}
-    else:
-        raise HTTPException(status_code=403, detail="Only the creator can delete this task.")
+    # Get deleter details
+    deleter_doc = None
+    if user_id != "admin" and ObjectId.is_valid(user_id):
+        if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+            deleter_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(user_id)})
+        if not deleter_doc:
+            deleter_doc = await db.users.find_one({"_id": ObjectId(user_id)})
+    
+    deleter_name = (deleter_doc.get("fullName") or deleter_doc.get("userName", "Admin")) if deleter_doc else "Admin"
+    deleter_email = deleter_doc.get("email") if deleter_doc else None
+
+    # Send notifications
+    await notify_task_deletion(deletion_targets, task_title, deleter_name, deleter_email)
+
+    return {"status": "success", "message": "Task deleted and removed from all assignments"}
 
 @router.delete("/task/user-task/{user_id}/unassign/{task_id}", status_code=200)
 async def unassign_user_from_task(request: Request, user_id: str, task_id: str):
@@ -649,32 +655,12 @@ async def mark_task_complete(request: Request, user_id: str, task_id: str):
 
     # 5. Send email to assigner (User1) if assignerEmail is stored
     if task_assignment and task_assignment.get("assignerEmail"):
-        assigner_email = task_assignment["assignerEmail"]
-        assigner_name = task_assignment.get("assignerName", "Admin")
-        current_date = datetime.now().strftime("%d %b %Y")
-        zepto_payload = {
-            "from": {"address": "support@alumnx.com", "name": "Alumnx AI Labs"},
-            "to": [{"email_address": {"address": assigner_email, "name": assigner_name}}],
-            "template_key": "2518b.6d1e43aa616e32a8.k1.f80371c0-025f-11f1-9250-ae9c7e0b6a9f.19c2c97aadc",
-            "merge_info": {
-                "date": current_date,
-                "name": assigner_name,
-                "agent_message": f"{assignee_name} has completed the task '{task_name}' assigned by you."
-            }
-        }
-        zepto_token = os.getenv("ZEPTO_MAIL_TOKEN")
-        if zepto_token:
-            try:
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        "https://api.zeptomail.in/v1.1/email/template",
-                        json=zepto_payload,
-                        headers={"accept": "application/json", "content-type": "application/json", "authorization": zepto_token},
-                        timeout=10.0
-                    )
-                print(f"✅ Completion email sent to assigner {assigner_email}")
-            except Exception as e:
-                print(f"⚠️ Email to assigner failed: {e}")
+        await send_task_completion_email(
+            task_assignment["assignerEmail"],
+            task_assignment.get("assignerName", "Admin"),
+            assignee_name,
+            task_name
+        )
 
     # 6. Existing proactive agent message (keep as is)
     agent_doc = await db.agents.find_one({"userId": user_id})
@@ -732,22 +718,29 @@ async def bulk_assign_tasks_to_user(request: Request, bulk_req: BulkAssignTasksR
     """
     Bulk assign multiple tasks to a user with their sequence IDs.
     Replaces all existing task assignments for the user.
-    
-    Request body:
-    {
-        "userId": "user123",
-        "tasks": [
-            {"taskId": "task1", "sequenceId": 1},
-            {"taskId": "task2", "sequenceId": 2},
-            {"taskId": "task3", "sequenceId": 3}
-        ]
-    }
     """
     db = request.app.state.db
     user_id = bulk_req.userId
     tasks = bulk_req.tasks
+    admin_id = bulk_req.adminId or "admin"
+    admin_name = bulk_req.adminName or "Admin"
+    admin_email = bulk_req.adminEmail or ""
 
-    print(f"📦 Bulk assigning {len(tasks)} tasks to user: {user_id}")
+    print(f"📦 Bulk assigning {len(tasks)} tasks to user {user_id} by {admin_id}")
+
+    # Fetch admin details if missing
+    if admin_id != "admin" and (not admin_email or admin_name == "Admin"):
+        admin_doc = None
+        if admin_id and ObjectId.is_valid(admin_id):
+            if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+                admin_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(admin_id)})
+            if not admin_doc:
+                admin_doc = await db.users.find_one({"_id": ObjectId(admin_id)})
+            
+            if admin_doc:
+                admin_email = admin_doc.get("email", admin_email)
+                admin_name = admin_doc.get("fullName") or admin_doc.get("userName") or admin_name
+                print(f"👤 Found admin info: {admin_name} ({admin_email})")
 
     # Verify all tasks exist
     task_ids = [task.taskId for task in tasks]
@@ -769,6 +762,9 @@ async def bulk_assign_tasks_to_user(request: Request, bulk_req: BulkAssignTasksR
         TaskAssignment(
             taskId=task.taskId,
             assignedBy="admin",
+            assignerUserId=admin_id,
+            assignerName=admin_name,
+            assignerEmail=admin_email,
             sequenceId=task.sequenceId,
             taskStatus="active",
             expectedCompletionDate=None
@@ -784,6 +780,26 @@ async def bulk_assign_tasks_to_user(request: Request, bulk_req: BulkAssignTasksR
         },
         upsert=True
     )
+
+    # Notify assignee
+    assignee_doc = None
+    if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+        assignee_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(user_id)})
+    if not assignee_doc:
+        assignee_doc = await db.users.find_one({"_id": ObjectId(user_id)})
+    
+    if assignee_doc and assignee_doc.get("email"):
+        # For bulk assign, we can send a summary or just notify about the first few
+        task_count = len(tasks)
+        task_names = [t.get("title", "a task") for t in existing_tasks[:3]]
+        task_summary = ", ".join(task_names) + (f" and {task_count-3} more" if task_count > 3 else "")
+        
+        await send_assignment_email(
+            assignee_doc["email"],
+            assignee_doc.get("fullName") or assignee_doc.get("userName", "Student"),
+            admin_name,
+            f"{task_count} tasks (including {task_summary})"
+        )
 
     print(f"✅ Bulk assigned {len(tasks)} tasks to user {user_id}")
     
@@ -1032,6 +1048,8 @@ async def broadcast_task(request: Request, body: Dict[str, Any] = Body(...)):
     db = request.app.state.db
     task_id = body.get("taskId")
     admin_id = body.get("adminId") # For verification
+    admin_name = body.get("adminName", "Admin")
+    admin_email = body.get("adminEmail", "")
     user_ids = body.get("userIds") # List of specific user IDs to broadcast to
     
     if admin_id != "6928870c5b168f52cf8bd77a":
@@ -1088,6 +1106,9 @@ async def broadcast_task(request: Request, body: Dict[str, Any] = Body(...)):
         new_task_assignment = {
             "taskId": task_id,
             "assignedBy": "admin",
+            "assignerUserId": admin_id,
+            "assignerName": admin_name,
+            "assignerEmail": admin_email,
             "taskStatus": "active",
             "expectedCompletionDate": None,
             "sequenceId": None,
