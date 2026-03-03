@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from bson import ObjectId
 from bson import ObjectId
-from utils.helpers import serialize
+from utils.helpers import serialize, send_task_completion_email, send_assignment_email
 from models import UserStats, DashboardStatsResponse, Assignment, Task
 
 router = APIRouter()
@@ -67,6 +67,8 @@ class AssignmentTemplate(BaseModel):
 class BroadcastTaskRequest(BaseModel):
     taskId: str
     adminId: str
+    adminName: Optional[str] = None
+    adminEmail: Optional[str] = None
     userIds: List[str]
 
 # --- Endpoints ---
@@ -251,9 +253,26 @@ async def broadcast_task_to_users(request: Request, body: BroadcastTaskRequest =
     db = request.app.state.db
     task_id = body.taskId
     user_ids = body.userIds
-    
-    print(f"📡 Broadcasting task {task_id} to {len(user_ids)} users")
-    
+    admin_id = body.adminId
+    admin_name = body.adminName or "Admin"
+    admin_email = body.adminEmail or ""
+
+    print(f"📡 Broadcasting task {task_id} to {len(user_ids)} users from {admin_id}")
+
+    # Fetch admin details if missing (to ensure email is available for notifications)
+    if not admin_email or admin_name == "Admin":
+        admin_doc = None
+        if admin_id and ObjectId.is_valid(admin_id):
+            if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+                admin_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(admin_id)})
+            if not admin_doc:
+                admin_doc = await db.users.find_one({"_id": ObjectId(admin_id)})
+            
+            if admin_doc:
+                admin_email = admin_doc.get("email", admin_email)
+                admin_name = admin_doc.get("fullName") or admin_doc.get("userName") or admin_name
+                print(f"👤 Found admin info: {admin_name} ({admin_email})")
+
     # 1. Ensure the task exists and is enabled
     task_doc = await db.tasks.find_one({"_id": ObjectId(task_id)})
     if not task_doc:
@@ -277,6 +296,9 @@ async def broadcast_task_to_users(request: Request, body: BroadcastTaskRequest =
             new_task_link = {
                 "taskId": task_id,
                 "assignedBy": "admin",
+                "assignerUserId": admin_id,
+                "assignerName": admin_name,
+                "assignerEmail": admin_email,
                 "sequenceId": None,
                 "taskStatus": "active",
                 "comments": []
@@ -287,6 +309,22 @@ async def broadcast_task_to_users(request: Request, body: BroadcastTaskRequest =
                 {"$push": {"tasks": new_task_link}},
                 upsert=True
             )
+            
+            # Notify assignee (User2)
+            assignee_doc = None
+            if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+                assignee_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(u_id)})
+            if not assignee_doc:
+                assignee_doc = await db.users.find_one({"_id": ObjectId(u_id)})
+            
+            if assignee_doc and assignee_doc.get("email"):
+                await send_assignment_email(
+                    assignee_doc["email"],
+                    assignee_doc.get("fullName") or assignee_doc.get("userName", "Student"),
+                    admin_name,
+                    task_doc.get("title") or task_doc.get("name", "a task")
+                )
+
             assigned_count += 1
             
     print(f"✅ Completed broadcast: {assigned_count} new assignments created")
@@ -377,9 +415,12 @@ async def fetch_user_assignments(request: Request, body: Dict[str, Any] = Body(.
             })
     return result
 
+import logging
+logger = logging.getLogger("project-school")
+
 @router.post("/assignments/user/complete-task", status_code=200)
 async def complete_user_task_proxy(request: Request, body: Dict[str, Any] = Body(...)):
-    """Proxy to mark a task as complete"""
+    """Proxy to mark a task as complete and notify the assigner"""
     db = request.app.state.db
     user_id = body.get("userId")
     task_id = body.get("taskId")
@@ -387,6 +428,16 @@ async def complete_user_task_proxy(request: Request, body: Dict[str, Any] = Body
     if not user_id or not task_id:
         raise HTTPException(status_code=400, detail="userId and taskId are required")
         
+    # 1. Fetch assignment BEFORE marking complete to get assigner details
+    assignment_doc = await db.assignments.find_one({"userId": user_id, "tasks.taskId": task_id})
+    task_assignment = None
+    if assignment_doc:
+        for t in assignment_doc.get("tasks", []):
+            if t.get("taskId") == task_id:
+                task_assignment = t
+                break
+
+    # 2. Mark complete
     await db.assignments.update_one(
         {"userId": user_id, "tasks.taskId": task_id},
         {"$set": {
@@ -394,7 +445,30 @@ async def complete_user_task_proxy(request: Request, body: Dict[str, Any] = Body
             "tasks.$.completionDate": datetime.now().isoformat()
         }}
     )
+
+    # 3. Send notification to assigner if assignerEmail is available
+    if task_assignment and task_assignment.get("assignerEmail"):
+        assigner_email = task_assignment["assignerEmail"]
+        assigner_name = task_assignment.get("assignerName", "Admin")
+        
+        # Get task title
+        task_doc = await db.tasks.find_one({"_id": ObjectId(task_id)}) if ObjectId.is_valid(task_id) else None
+        task_title = task_doc.get("title") or task_doc.get("name", "a task") if task_doc else "a task"
+
+        # Get assignee details
+        assignee_doc = None
+        if ObjectId.is_valid(user_id):
+            if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+                assignee_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(user_id)})
+            if not assignee_doc:
+                assignee_doc = await db.users.find_one({"_id": ObjectId(user_id)})
+        assignee_name = (assignee_doc.get("fullName") or assignee_doc.get("userName", "Student")) if assignee_doc else "Student"
+
+        # Send email via ZeptoMail helper
+        await send_task_completion_email(assigner_email, assigner_name, assignee_name, task_title)
+
     return {"status": "success"}
+
 @router.post("/tasks/link-user-task", status_code=200)
 async def link_task_to_user_proxy(request: Request, body: Dict[str, Any] = Body(...)):
     db = request.app.state.db
@@ -410,11 +484,18 @@ async def link_task_to_user_proxy(request: Request, body: Dict[str, Any] = Body(
     if assigner_user_id and ObjectId.is_valid(assigner_user_id):
         if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
             assigner_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(assigner_user_id)})
+            if assigner_doc: logger.info(f"👤 Found assigner in main_db: {assigner_doc.get('email')}")
         if not assigner_doc:
             assigner_doc = await db.users.find_one({"_id": ObjectId(assigner_user_id)})
+            if assigner_doc: logger.info(f"👤 Found assigner in project_db: {assigner_doc.get('email')}")
+        
         if assigner_doc:
             assigner_email = assigner_doc.get("email", "")
             assigner_name = assigner_doc.get("fullName") or assigner_doc.get("userName", assigner_name)
+        else:
+            logger.warning(f"⚠️ Assigner ID {assigner_user_id} not found in any database.")
+    else:
+        logger.warning(f"⚠️ No valid assignerUserId provided: '{assigner_user_id}'")
     if not user_id or not task_id:
         raise HTTPException(status_code=400, detail="userId and taskId are required")
 
@@ -441,7 +522,7 @@ async def link_task_to_user_proxy(request: Request, body: Dict[str, Any] = Body(
         task_doc = await db.tasks.find_one({"_id": ObjectId(task_id)}) if ObjectId.is_valid(task_id) else None
         task_title = task_doc.get("title", "a task") if task_doc else "a task"
 
-        # Get assignee details for email
+        # Notify assignee (User2)
         assignee_doc = None
         if ObjectId.is_valid(user_id):
             if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
@@ -449,37 +530,13 @@ async def link_task_to_user_proxy(request: Request, body: Dict[str, Any] = Body(
             if not assignee_doc:
                 assignee_doc = await db.users.find_one({"_id": ObjectId(user_id)})
 
-        assignee_email = assignee_doc.get("email") if assignee_doc else None
-        assignee_name = (assignee_doc.get("fullName") or assignee_doc.get("userName", "Student")) if assignee_doc else "Student"
-
-        # Send email to assignee (User2)
-        if assignee_email:
-            from datetime import datetime as dt
-            current_date = dt.now().strftime("%d %b %Y")
-            zepto_payload = {
-                "from": {"address": "support@alumnx.com", "name": "Alumnx AI Labs"},
-                "to": [{"email_address": {"address": assignee_email, "name": assignee_name}}],
-                "template_key": "2518b.6d1e43aa616e32a8.k1.f80371c0-025f-11f1-9250-ae9c7e0b6a9f.19c2c97aadc",
-                "merge_info": {
-                    "date": current_date,
-                    "name": assignee_name,
-                    "agent_message": f"{assigner_name} has assigned you a task: '{task_title}'. Please login to complete it."
-                }
-            }
-            import os, httpx
-            zepto_token = os.getenv("ZEPTO_MAIL_TOKEN")
-            if zepto_token:
-                try:
-                    async with httpx.AsyncClient() as client:
-                        await client.post(
-                            "https://api.zeptomail.in/v1.1/email/template",
-                            json=zepto_payload,
-                            headers={"accept": "application/json", "content-type": "application/json", "authorization": zepto_token},
-                            timeout=10.0
-                        )
-                    print(f"✅ Assignment email sent to {assignee_email}")
-                except Exception as e:
-                    print(f"⚠️ Email failed: {e}")
+        if assignee_doc and assignee_doc.get("email"):
+            await send_assignment_email(
+                assignee_doc["email"],
+                assignee_doc.get("fullName") or assignee_doc.get("userName", "Student"),
+                assigner_name,
+                task_title
+            )
 
     return {"status": "success"}
 
