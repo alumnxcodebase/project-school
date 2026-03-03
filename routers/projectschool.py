@@ -3,7 +3,9 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from bson import ObjectId
-from bson import ObjectId
+import base64
+import httpx
+import os
 from utils.helpers import serialize, send_task_completion_email, send_assignment_email
 from models import UserStats, DashboardStatsResponse, Assignment, Task
 
@@ -74,6 +76,7 @@ class BroadcastTaskRequest(BaseModel):
 class SendJobsEmailRequest(BaseModel):
     collegeId: Optional[str] = None
     allColleges: bool = False
+    excludeIITG: bool = False
     templateId: Optional[str] = None
     jobShortCodes: str # CSV string
 
@@ -770,59 +773,58 @@ async def send_jobs_email(request: Request, body: SendJobsEmailRequest = Body(..
         raise HTTPException(status_code=500, detail="ZEPTO_MAIL_TOKEN not configured")
 
     # 1. Process Job Shortcodes
-    short_codes = [sc.strip() for sc in body.jobShortCodes.split(",") if sc.strip()]
+    # Sanitize short codes: strip any quotes and whitespace
+    short_codes = [sc.replace('"', '').replace("'", "").strip() for sc in body.jobShortCodes.split(",") if sc.strip()]
     if not short_codes:
         raise HTTPException(status_code=400, detail="No job shortcodes provided")
 
+    # Fetch all requested jobs once
     cursor = db.jobposts.find({"shortCode": {"$in": short_codes}})
-    jobs = []
+    all_jobs_list = []
     async for doc in cursor:
-        jobs.append(doc)
+        all_jobs_list.append(doc)
     
-    if not jobs:
+    if not all_jobs_list:
         raise HTTPException(status_code=404, detail="No jobs found for the provided shortcodes")
 
-    # 2. Format Job List HTML
-    jobs_html = "<ul>"
-    for job in jobs:
-        title = job.get("jobTitle") or job.get("title") or "Untitled Job"
-        # Preference: registrationLink > applyLink > sourceUrl
-        link = job.get("registrationLink") or job.get("applyLink") or job.get("sourceUrl")
-        
-        if link:
-            # Basic validation/cleanup for link
-            if not link.startswith("http"):
-                link = "https://" + link
-            jobs_html += f"<li><strong>{title}</strong>: <a href='{link}'>Apply Here</a></li>"
-        else:
-            jobs_html += f"<li><strong>{title}</strong></li>"
-    jobs_html += "</ul>"
-
-    # 3. Identify Target Users
+    # 2. Identify Target Users
     user_query = {"email": {"$exists": True, "$ne": ""}}
-    if not body.allColleges and body.collegeId:
+    
+    # IITG Exclusion Logic
+    if body.allColleges and body.excludeIITG:
+        # Find IITG's collegeId using a case-insensitive regex
+        import re
+        iitg_college = await db.colleges.find_one({"collegeName": {"$regex": re.compile("Indian Institute of Technology.*Guwahati|IIT.*Guwahati|IITG", re.IGNORECASE)}})
+        if iitg_college:
+            user_query["collegeId"] = {"$ne": iitg_college["_id"]}
+
+    elif not body.allColleges and body.collegeId:
         if ObjectId.is_valid(body.collegeId):
             user_query["collegeId"] = ObjectId(body.collegeId)
         else:
-            # Try string match if not a valid ObjectId (some systems store as strings)
             user_query["collegeId"] = body.collegeId
 
-    user_cursor = db.users.find(user_query, {"email": 1, "fullName": 1, "userName": 1})
+    # Fetch Unsubscribed List
+    unsubscribed_emails = await db.email_unsubscribes.distinct("email")
+    if unsubscribed_emails:
+        user_query["email"]["$nin"] = unsubscribed_emails
+
+    # Fetch users with collegeId for personalization
+    user_cursor = db.users.find(user_query, {"email": 1, "fullName": 1, "userName": 1, "collegeId": 1})
     target_users = []
     async for u in user_cursor:
-        target_users.append({
-            "email": u.get("email"),
-            "name": u.get("fullName") or u.get("userName") or "Alumnus"
-        })
+        target_users.append(u)
 
     if not target_users:
         return {"status": "success", "message": "No users found for the selected criteria", "sentCount": 0}
 
-    # 4. Dispatch Emails via ZeptoMail (Batched for efficiency if many users)
-    # ZeptoMail supports multiple recipients in one call, but let's keep it simple or follow existing helper patterns.
-    # Existing helpers send one by one. For thousands of users, we should ideally use ZeptoMail's batching.
-    # But for now, let's implement a robust loop.
-    
+    # Fetch College Names for mapping
+    colleges_cursor = db.colleges.find({}, {"collegeName": 1, "_id": 1})
+    college_map = {}
+    async for c in colleges_cursor:
+        college_map[str(c["_id"])] = c.get("collegeName") or "your college"
+
+    # 4. Dispatch Emails via ZeptoMail
     template_key = body.templateId or "2518b.6d1e43aa616e32a8.k1.f80371c0-025f-11f1-9250-ae9c7e0b6a9f.19c2c97aadc"
     current_date = datetime.now().strftime("%d %b %Y")
     
@@ -831,14 +833,73 @@ async def send_jobs_email(request: Request, body: SendJobsEmailRequest = Body(..
     
     async with httpx.AsyncClient() as client:
         for user in target_users:
+            user_email = user.get("email")
+            user_name = user.get("fullName") or user.get("userName") or "Alumnus"
+            user_college_id = str(user.get("collegeId")) if user.get("collegeId") else None
+            user_college_name = college_map.get(user_college_id, "your college")
+
+            # Generate Unsubscribe Link first to use in message
+            unsubscribe_token = base64.b64encode(user_email.encode()).decode()
+            unsubscribe_url = f"https://projectschool.alumnx.com/api/projectschool/unsubscribe?token={unsubscribe_token}"
+
+            # --- Personalize Message Structure ---
+            
+            # 1. Intro
+            job_details_html = f"<p style='margin-bottom: 20px; font-size: 16px;'>As you are a registered user of Alumnx, we are sending you a curated list of jobs from your Alumni Updated and From Alumnx Jobs.</p>"
+
+            # 2. Alumni Heading Box
+            job_details_html += """
+            <div style="background-color: #25586b; color: #ffffff; padding: 12px 18px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; font-size: 16px;">
+                Your college alumni jobs
+            </div>
+            """
+
+            # 3. Alumni Jobs Section
+            alumni_jobs = [j for j in all_jobs_list if str(j.get("postedByCollegeId")) == user_college_id]
+            if alumni_jobs:
+                job_details_html += "<ul style='margin-bottom: 30px; padding-left: 20px; line-height: 1.6;'>"
+                for job in alumni_jobs:
+                    title = job.get("jobTitle") or job.get("title") or "Untitled Job"
+                    short_code = job.get("shortCode")
+                    job_link = f"https://alumnx.com/jobs?job={short_code}"
+                    job_details_html += f"<li style='margin-bottom: 12px;'><strong style='color: #0f172a;'>{title}</strong>: <a href='{job_link}' style='color: #2563eb; text-decoration: none; font-weight: 600;'>Apply in Portal</a></li>"
+                job_details_html += "</ul>"
+            else:
+                job_details_html += f"<p style='margin-bottom: 30px; color: #64748b; font-style: italic; padding: 0 10px;'>You don't have alumni jobs from {user_college_name} yet.</p>"
+
+            # 4. Alumnx Curated Jobs Heading Box
+            job_details_html += """
+            <div style="background-color: #25586b; color: #ffffff; padding: 12px 18px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; font-size: 16px;">
+                Alumnx Curated Jobs in AI/ML/DS
+            </div>
+            """
+
+            # 5. General Jobs Section
+            job_details_html += "<ul style='margin-bottom: 35px; padding-left: 20px; line-height: 1.6;'>"
+            for job in all_jobs_list:
+                title = job.get("jobTitle") or job.get("title") or "Untitled Job"
+                short_code = job.get("shortCode")
+                job_link = f"https://alumnx.com/jobs?job={short_code}"
+                job_details_html += f"<li style='margin-bottom: 12px;'><strong style='color: #0f172a;'>{title}</strong>: <a href='{job_link}' style='color: #2563eb; text-decoration: none; font-weight: 600;'>Apply in Portal</a></li>"
+            job_details_html += "</ul>"
+
+            # 6. Unsubscribe & Footer
+            job_details_html += f"""
+            <div style="border-top: 1px solid #e2e8f0; padding-top: 25px; margin-top: 20px; font-size: 14px; color: #64748b;">
+                <p>If you do not want to get this email every week, you can <a href='{unsubscribe_url}' style='color: #64748b; text-decoration: underline;'>click here to unsubscribe</a> Alumni Jobs.</p>
+                <p style="margin-top: 20px; font-weight: bold; color: #0f172a;">Thank you,<br>Support@Alumnx.com</p>
+            </div>
+            """
+            
             zepto_payload = {
                 "from": {"address": "support@alumnx.com", "name": "Alumnx AI Labs"},
-                "to": [{"email_address": {"address": user["email"], "name": user["name"]}}],
+                "to": [{"email_address": {"address": user_email, "name": user_name}}],
                 "template_key": template_key,
                 "merge_info": {
                     "date": current_date,
-                    "name": user["name"],
-                    "message": jobs_html # This will be injected into {{message}}
+                    "name": user_name,
+                    "agent_message": job_details_html,
+                    "unsubscribe_link": unsubscribe_url
                 }
             }
             
@@ -857,15 +918,41 @@ async def send_jobs_email(request: Request, body: SendJobsEmailRequest = Body(..
                     success_count += 1
                 else:
                     failed_count += 1
-                    logger.error(f"❌ ZeptoMail error for {user['email']}: {response.text}")
             except Exception as e:
                 failed_count += 1
-                logger.error(f"⚠️ Failed to send job email to {user['email']}: {e}")
 
     return {
         "status": "success",
         "totalUsers": len(target_users),
         "successCount": success_count,
         "failedCount": failed_count,
-        "jobsProcessed": len(jobs)
+        "jobsProcessed": len(all_jobs_list)
     }
+
+@router.get("/unsubscribe")
+async def unsubscribe(request: Request, token: str):
+    """
+    Unsubscribe a user from job emails using a base64 encoded email token.
+    """
+    if not hasattr(request.app.state, 'main_db') or request.app.state.main_db is None:
+        raise HTTPException(status_code=503, detail="Main Database not available")
+    
+    db = request.app.state.main_db
+    try:
+        email = base64.b64decode(token).decode()
+        await db.email_unsubscribes.update_one(
+            {"email": email},
+            {"$set": {"email": email, "unsubscribedAt": datetime.now()}},
+            upsert=True
+        )
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content="""
+            <html>
+                <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+                    <h2 style="color: #25586B;">Successfully Unsubscribed</h2>
+                    <p>You will no longer receive job digest emails from Alumnx AI Labs.</p>
+                </body>
+            </html>
+        """)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Invalid unsubscribe token")
