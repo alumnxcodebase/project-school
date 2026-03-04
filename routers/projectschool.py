@@ -62,7 +62,7 @@ class AssignmentTemplate(BaseModel):
     name: str
     description: Optional[str] = None
     tasks: List[AssignmentTemplateTask] = Field(default_factory=list)
-    isGlobal: bool = False # Default to private for assignments
+    isGlobal: bool = False
     createdBy: str = "admin"
     createdAt: datetime = Field(default_factory=datetime.now)
 
@@ -78,7 +78,7 @@ class SendJobsEmailRequest(BaseModel):
     allColleges: bool = False
     excludeIITG: bool = False
     templateId: Optional[str] = None
-    jobShortCodes: str # CSV string
+    jobShortCodes: str  # CSV string
 
 # --- Endpoints ---
 
@@ -95,7 +95,6 @@ async def get_colleges(request: Request):
     colleges = []
     async for doc in cursor:
         college = serialize(doc)
-        # Compatibility mapping for frontend
         if "collegeName" not in college and "name" in college:
             college["collegeName"] = college["name"]
         colleges.append(college)
@@ -107,7 +106,6 @@ async def reports_login(request: Request, login_data: LoginRequest = Body(...)):
     """
     Login for Reports Admin (uses Main DB Users)
     """
-    # Normalize name for logging
     raw_name = login_data.userName.strip()
     print(f"🔐 Login Attempt: {raw_name}")
 
@@ -117,7 +115,6 @@ async def reports_login(request: Request, login_data: LoginRequest = Body(...)):
         
     db = request.app.state.main_db
     
-    # access users collection - Case-insensitive match for userName, email, or fullName
     import re
     regex_user = re.compile(f"^{re.escape(raw_name)}$", re.IGNORECASE)
     
@@ -131,7 +128,6 @@ async def reports_login(request: Request, login_data: LoginRequest = Body(...)):
     
     if not user:
         print(f"❌ User not found: {raw_name}")
-        # Try a partial match if exact case-insensitive fails (last resort)
         user = await db.users.find_one({
             "$or": [
                 {"userName": {"$regex": re.compile(re.escape(raw_name), re.IGNORECASE)}},
@@ -143,18 +139,15 @@ async def reports_login(request: Request, login_data: LoginRequest = Body(...)):
         else:
              print(f"💡 Found partial/alternate match: {user.get('userName')}")
         
-    # Check password
     if not user.get("password"):
          print(f"❌ User has no password set: {user.get('userName')}")
          raise HTTPException(status_code=400, detail="Invalid credentials")
 
     try:
-        # bcrypt.checkpw requires bytes
         password_bytes = login_data.password.encode('utf-8')
         hashed_bytes = user["password"].encode('utf-8')
         
         if bcrypt.checkpw(password_bytes, hashed_bytes):
-            # Allow admin ('a') OR students ('s') if they have a password set explicitly
             u_type = user.get("userType", "s")
             if u_type in ["a", "s"]:
                 print(f"✅ Login Success: {user.get('userName')} (Type: {u_type})")
@@ -181,7 +174,6 @@ async def get_all_projects_list(request: Request, userId: Optional[str] = None):
     """
     db = request.app.state.db
     
-    # Visibility logic
     ADMIN_ID = "6928870c5b168f52cf8bd77a"
     admin_creators = [None, "admin", ADMIN_ID]
     
@@ -193,11 +185,9 @@ async def get_all_projects_list(request: Request, userId: Optional[str] = None):
             ]
         }
     else:
-        # If no user context, only show public/admin projects
         query = {"createdBy": {"$in": admin_creators}}
         
     print(f"🔍 Fetching project list for dashboard with query: {query}")
-    # Projects are in the Agriculture DB
     cursor = db.projects.find(query, {"_id": 1, "name": 1, "description": 1, "projectType": 1, "status": 1})
     projects = []
     async for doc in cursor:
@@ -207,14 +197,11 @@ async def get_all_projects_list(request: Request, userId: Optional[str] = None):
 
 @router.get("/get-cohort-members", status_code=200)
 async def get_cohort_members(request: Request):
-    # Use Main DB for users
     if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
         db = request.app.state.main_db
     else:
-        # Fallback to default DB if main_db not set
         db = request.app.state.db
         
-    # Get unique user IDs from projectschools collection (the 34 members)
     try:
         ps_user_ids = await db.projectschools.distinct("userId")
         print(f"📋 Found {len(ps_user_ids)} users in projectschools")
@@ -222,27 +209,19 @@ async def get_cohort_members(request: Request):
         print(f"⚠️ Error fetching from projectschools: {e}")
         ps_user_ids = []
 
-    # Filter users based on projectschools membership if found
     query = {}
     if ps_user_ids:
         query = {"_id": {"$in": ps_user_ids}}
     else:
-        # Fallback to fetching all but limited if no members found (to avoid 15k)
         print("⚠️ No projectschool members found, falling back to all users (LIMITED)")
-        # This is just a safety measure
-        # return [] # Or maybe some other logic
         
-    # Fetch users with relevant fields
     cursor = db.users.find(query, {"_id": 1, "fullName": 1, "name": 1, "userName": 1, "email": 1, "phone": 1, "subscriptionStatus": 1})
     members = []
     async for doc in cursor:
         member = serialize(doc)
-        # Map backend 'fullName' to frontend expected 'fullName' and 'id' to 'userId'
         member["userId"] = member.get("id")
-        # Robust name fallback
         member["fullName"] = member.get("fullName") or member.get("name") or member.get("userName") or "Unknown User"
         
-        # Determine subscription status flags
         raw_status = member.get("subscriptionStatus")
         sub_status = str(raw_status if raw_status else "trial").lower()
         member["isPaid"] = sub_status == "paid"
@@ -261,13 +240,11 @@ async def create_project_task(request: Request, task: Task = Body(...)):
     db = request.app.state.db
     task_dict = task.model_dump(exclude={"id"})
     
-    # Set required defaults
     if not task_dict.get("updatedAt"):
         task_dict["updatedAt"] = datetime.now()
     
-    # Force isEnabled true if it's being created for broadcast
     task_dict["isEnabled"] = True
-    task_dict["isGlobal"] = task_dict.get("isGlobal", False) # Default to private
+    task_dict["isGlobal"] = task_dict.get("isGlobal", False)
     
     result = await db.tasks.insert_one(task_dict)
     created_task = await db.tasks.find_one({"_id": result.inserted_id})
@@ -277,7 +254,7 @@ async def create_project_task(request: Request, task: Task = Body(...)):
 @router.post("/tasks/broadcast-task", status_code=200)
 async def broadcast_task_to_users(request: Request, body: BroadcastTaskRequest = Body(...)):
     """
-    Link a task ID to multiple users in one go
+    Link a task ID to multiple users in one go (active status, selected users)
     """
     db = request.app.state.db
     task_id = body.taskId
@@ -288,7 +265,6 @@ async def broadcast_task_to_users(request: Request, body: BroadcastTaskRequest =
 
     print(f"📡 Broadcasting task {task_id} to {len(user_ids)} users from {admin_id}")
 
-    # Fetch admin details if missing (to ensure email is available for notifications)
     if not admin_email or admin_name == "Admin":
         admin_doc = None
         if admin_id and ObjectId.is_valid(admin_id):
@@ -302,7 +278,6 @@ async def broadcast_task_to_users(request: Request, body: BroadcastTaskRequest =
                 admin_name = admin_doc.get("fullName") or admin_doc.get("userName") or admin_name
                 print(f"👤 Found admin info: {admin_name} ({admin_email})")
 
-    # 1. Ensure the task exists and is enabled
     task_doc = await db.tasks.find_one({"_id": ObjectId(task_id)})
     if not task_doc:
         raise HTTPException(status_code=404, detail="Task template not found")
@@ -312,10 +287,8 @@ async def broadcast_task_to_users(request: Request, body: BroadcastTaskRequest =
         {"$set": {"isEnabled": True}}
     )
     
-    # 2. Assign to each user (Deduplicated)
     assigned_count = 0
     for u_id in user_ids:
-        # Check if already assigned
         existing = await db.assignments.find_one({
             "userId": u_id,
             "tasks.taskId": task_id
@@ -339,7 +312,6 @@ async def broadcast_task_to_users(request: Request, body: BroadcastTaskRequest =
                 upsert=True
             )
             
-            # Notify assignee (User2)
             assignee_doc = None
             if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
                 assignee_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(u_id)})
@@ -347,17 +319,171 @@ async def broadcast_task_to_users(request: Request, body: BroadcastTaskRequest =
                 assignee_doc = await db.users.find_one({"_id": ObjectId(u_id)})
             
             if assignee_doc and assignee_doc.get("email"):
+                project_name = "Personal"
+                project_id = task_doc.get("project_id")
+                if project_id and ObjectId.is_valid(project_id):
+                    project_doc = await db.projects.find_one({"_id": ObjectId(project_id)})
+                    if project_doc:
+                        project_name = project_doc.get("name", "Personal")
+
                 await send_assignment_email(
                     assignee_doc["email"],
                     assignee_doc.get("fullName") or assignee_doc.get("userName", "Student"),
                     admin_name,
-                    task_doc.get("title") or task_doc.get("name", "a task")
+                    task_doc.get("title") or task_doc.get("name", "a task"),
+                    project_name=project_name,
+                    day=task_doc.get("day"),
+                    task_type=task_doc.get("taskType"),
+                    task_description=task_doc.get("description") or task_doc.get("taskDescription")
                 )
 
             assigned_count += 1
             
     print(f"✅ Completed broadcast: {assigned_count} new assignments created")
     return {"status": "success", "assignedCount": assigned_count}
+
+
+# ─── NEW ENDPOINT: Assign task to ALL cohort members as PENDING ───────────────
+@router.post("/tasks/assign-all-cohort", status_code=200)
+async def assign_task_to_all_cohort(request: Request, body: Dict[str, Any] = Body(...)):
+    """
+    Assigns an existing task to ALL cohort members with taskStatus='pending' (NOT active).
+    isEnabled is set to True on the task so admin can later mark individual users as active.
+    Sends assignment email notifications to all cohort members.
+
+    Called when admin creates a task without selecting any specific users.
+    Admin must manually mark each user's task as active via the existing
+    PUT /tasks/user-tasks/{user_id}/{task_id}/active endpoint.
+    """
+    db = request.app.state.db
+    task_id = body.get("taskId")
+    admin_id = body.get("adminId", "admin")
+
+    if not task_id:
+        raise HTTPException(status_code=400, detail="taskId is required")
+
+    # 1. Validate task exists
+    if not ObjectId.is_valid(task_id):
+        raise HTTPException(status_code=400, detail="Invalid taskId format")
+
+    task_doc = await db.tasks.find_one({"_id": ObjectId(task_id)})
+    if not task_doc:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # 2. Ensure task is enabled (but NOT active per user — that's the point)
+    await db.tasks.update_one(
+        {"_id": ObjectId(task_id)},
+        {"$set": {"isEnabled": True}}
+    )
+    print(f"✅ Task {task_id} marked as isEnabled=True")
+
+    # 3. Resolve admin info for email notifications
+    admin_name = "Admin"
+    admin_email = ""
+    if admin_id and ObjectId.is_valid(admin_id):
+        admin_doc = None
+        if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
+            admin_doc = await request.app.state.main_db.users.find_one({"_id": ObjectId(admin_id)})
+        if not admin_doc:
+            admin_doc = await db.users.find_one({"_id": ObjectId(admin_id)})
+        if admin_doc:
+            admin_name = admin_doc.get("fullName") or admin_doc.get("userName", "Admin")
+            admin_email = admin_doc.get("email", "")
+            print(f"👤 Admin resolved: {admin_name} ({admin_email})")
+
+    # 4. Fetch all cohort members — reuses same logic as get-cohort-members endpoint
+    user_db = request.app.state.main_db if (
+        hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None
+    ) else db
+
+    try:
+        ps_user_ids = await user_db.projectschools.distinct("userId")
+    except Exception as e:
+        print(f"⚠️ Error fetching projectschool user IDs: {e}")
+        ps_user_ids = []
+
+    if not ps_user_ids:
+        raise HTTPException(status_code=404, detail="No cohort members found in projectschools collection")
+
+    cursor = user_db.users.find(
+        {"_id": {"$in": ps_user_ids}},
+        {"_id": 1, "fullName": 1, "userName": 1, "email": 1}
+    )
+    cohort_members = [doc async for doc in cursor]
+    print(f"📡 Assigning task {task_id} to {len(cohort_members)} cohort members as PENDING")
+
+    # 5. Fetch project name once (reused for all email notifications)
+    project_name = "Personal"
+    project_id = task_doc.get("project_id")
+    if project_id and ObjectId.is_valid(str(project_id)):
+        project_doc = await db.projects.find_one({"_id": ObjectId(str(project_id))})
+        if project_doc:
+            project_name = project_doc.get("name", "Personal")
+
+    # 6. Assign to each cohort member with taskStatus = "pending" (NOT "active")
+    assigned_count = 0
+    skipped_count = 0
+
+    for member in cohort_members:
+        u_id = str(member["_id"])
+
+        # Deduplicate — skip if already assigned
+        existing = await db.assignments.find_one({
+            "userId": u_id,
+            "tasks.taskId": task_id
+        })
+        if existing:
+            skipped_count += 1
+            continue
+
+        new_task_link = {
+            "taskId": task_id,
+            "assignedBy": "admin",
+            "assignerUserId": admin_id,
+            "assignerName": admin_name,
+            "assignerEmail": admin_email,
+            "sequenceId": None,
+            # ── PENDING: task is created but NOT active yet ──
+            # Admin activates individually via PUT /tasks/user-tasks/{userId}/{taskId}/active
+            "taskStatus": "pending",
+            "comments": []
+        }
+
+        await db.assignments.update_one(
+            {"userId": u_id},
+            {"$push": {"tasks": new_task_link}},
+            upsert=True
+        )
+
+        # Send email notification to each cohort member immediately
+        member_email = member.get("email")
+        if member_email:
+            member_name = member.get("fullName") or member.get("userName", "Student")
+            try:
+                await send_assignment_email(
+                    member_email,
+                    member_name,
+                    admin_name,
+                    task_doc.get("title") or task_doc.get("name", "a task"),
+                    project_name=project_name,
+                    day=task_doc.get("day"),
+                    task_type=task_doc.get("taskType"),
+                    task_description=task_doc.get("description") or task_doc.get("taskDescription")
+                )
+            except Exception as email_err:
+                print(f"⚠️ Failed to send email to {member_email}: {email_err}")
+
+        assigned_count += 1
+
+    print(f"✅ Assigned to {assigned_count} cohort members as pending (skipped {skipped_count} already assigned)")
+    return {
+        "status": "success",
+        "assignedCount": assigned_count,
+        "skippedCount": skipped_count,
+        "totalCohort": len(cohort_members)
+    }
+# ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.post("/feedback/fetch", status_code=200)
 async def fetch_user_feedback(request: Request, body: Dict[str, Any] = Body(...)):
@@ -381,14 +507,9 @@ async def fetch_user_assignments(request: Request, body: Dict[str, Any] = Body(.
     if not user_id:
         raise HTTPException(status_code=400, detail="userId is required")
     
-    # This expects assignment_templates but filtered/mapped for the user?
-    # Actually the component expects a list where each item has tasks with isTaskDone.
-    # We'll return an empty list for now or adapt based on current schema.
-    # For now, let's just return what's in assignment_templates and check if assigned.
     cursor = db.assignment_templates.find().sort("createdAt", -1)
     templates = [serialize(doc) async for doc in cursor]
     
-    # Get user's active assignments from 'assignments' collection
     user_assignment_doc = await db.assignments.find_one({"userId": user_id})
     assigned_task_ids = {}
     if user_assignment_doc and user_assignment_doc.get("tasks"):
@@ -397,30 +518,13 @@ async def fetch_user_assignments(request: Request, body: Dict[str, Any] = Body(.
 
     result = []
     for temp in templates:
-        # For security, we only show templates that have at least one task
-        # either assigned to the user OR marked as global (if templates support that)
-        # For now, we'll check if any task in this template matches an assigned taskId
-        
         template_tasks = temp.get("tasks", [])
-        # We need to map this to what the component expects
-        # { assignmentId, assignmentName, assignmentDescription, tasks: [{ taskId, name, description, isTaskDone }] }
         formatted_tasks = []
         is_any_task_assigned = False
         
         for t in template_tasks:
-            # We don't have taskId in templates easily, they are template tasks
-            # Match by name/description or ID if available
             t_id = str(t.get("_id", ""))
             t_name = t.get("name")
-            
-            # This is tricky because templates don't always have taskId links
-            # But the 'link-user-task' usually links them.
-            # For now, let's allow templates ONLY if the user has assignments
-            # OR if the template is marked as global (if that field exists)
-            
-            # IMPROVEMENT: If the template has NO assigned tasks for this user, skip it?
-            # For compatibility with existing broadcast logic, we'll check if the 
-            # template name matches an active assignment roughly, or if specific tasks coincide.
             
             is_done = assigned_task_ids.get(t_id, False)
             if t_id in assigned_task_ids:
@@ -433,7 +537,6 @@ async def fetch_user_assignments(request: Request, body: Dict[str, Any] = Body(.
                 "isTaskDone": is_done
             })
         
-        # Only include if at least one task is assigned OR if it's explicitly global
         if is_any_task_assigned or temp.get("isGlobal"):
             result.append({
                 "assignmentId": str(temp["id"]),
@@ -457,7 +560,6 @@ async def complete_user_task_proxy(request: Request, body: Dict[str, Any] = Body
     if not user_id or not task_id:
         raise HTTPException(status_code=400, detail="userId and taskId are required")
         
-    # 1. Fetch assignment BEFORE marking complete to get assigner details
     assignment_doc = await db.assignments.find_one({"userId": user_id, "tasks.taskId": task_id})
     task_assignment = None
     if assignment_doc:
@@ -466,7 +568,6 @@ async def complete_user_task_proxy(request: Request, body: Dict[str, Any] = Body
                 task_assignment = t
                 break
 
-    # 2. Mark complete
     await db.assignments.update_one(
         {"userId": user_id, "tasks.taskId": task_id},
         {"$set": {
@@ -475,16 +576,13 @@ async def complete_user_task_proxy(request: Request, body: Dict[str, Any] = Body
         }}
     )
 
-    # 3. Send notification to assigner if assignerEmail is available
     if task_assignment and task_assignment.get("assignerEmail"):
         assigner_email = task_assignment["assignerEmail"]
         assigner_name = task_assignment.get("assignerName", "Admin")
         
-        # Get task title
         task_doc = await db.tasks.find_one({"_id": ObjectId(task_id)}) if ObjectId.is_valid(task_id) else None
         task_title = task_doc.get("title") or task_doc.get("name", "a task") if task_doc else "a task"
 
-        # Get assignee details
         assignee_doc = None
         if ObjectId.is_valid(user_id):
             if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
@@ -493,7 +591,6 @@ async def complete_user_task_proxy(request: Request, body: Dict[str, Any] = Body
                 assignee_doc = await db.users.find_one({"_id": ObjectId(user_id)})
         assignee_name = (assignee_doc.get("fullName") or assignee_doc.get("userName", "Student")) if assignee_doc else "Student"
 
-        # Send email via ZeptoMail helper
         await send_task_completion_email(assigner_email, assigner_name, assignee_name, task_title)
 
     return {"status": "success"}
@@ -508,7 +605,6 @@ async def link_task_to_user_proxy(request: Request, body: Dict[str, Any] = Body(
     assigner_name = body.get("assignerName", "Admin")
     assigner_email = body.get("assignerEmail", "")
 
-    # Fetch assigner email from DB using assignerUserId
     assigner_doc = None
     if assigner_user_id and ObjectId.is_valid(assigner_user_id):
         if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
@@ -525,6 +621,7 @@ async def link_task_to_user_proxy(request: Request, body: Dict[str, Any] = Body(
             logger.warning(f"⚠️ Assigner ID {assigner_user_id} not found in any database.")
     else:
         logger.warning(f"⚠️ No valid assignerUserId provided: '{assigner_user_id}'")
+
     if not user_id or not task_id:
         raise HTTPException(status_code=400, detail="userId and taskId are required")
 
@@ -534,9 +631,9 @@ async def link_task_to_user_proxy(request: Request, body: Dict[str, Any] = Body(
         new_link = {
             "taskId": task_id,
             "assignedBy": assigned_by,
-            "assignerUserId": assigner_user_id,    # NEW
-            "assignerName": assigner_name,          # NEW
-            "assignerEmail": assigner_email,        # NEW
+            "assignerUserId": assigner_user_id,
+            "assignerName": assigner_name,
+            "assignerEmail": assigner_email,
             "sequenceId": body.get("sequenceId"),
             "taskStatus": "active" if assigned_by == "admin" else "pending",
             "comments": []
@@ -547,11 +644,9 @@ async def link_task_to_user_proxy(request: Request, body: Dict[str, Any] = Body(
             upsert=True
         )
 
-        # Get task title
         task_doc = await db.tasks.find_one({"_id": ObjectId(task_id)}) if ObjectId.is_valid(task_id) else None
         task_title = task_doc.get("title", "a task") if task_doc else "a task"
 
-        # Notify assignee (User2)
         assignee_doc = None
         if ObjectId.is_valid(user_id):
             if hasattr(request.app.state, 'main_db') and request.app.state.main_db is not None:
@@ -560,11 +655,22 @@ async def link_task_to_user_proxy(request: Request, body: Dict[str, Any] = Body(
                 assignee_doc = await db.users.find_one({"_id": ObjectId(user_id)})
 
         if assignee_doc and assignee_doc.get("email"):
+            project_name = "Personal"
+            project_id = task_doc.get("project_id") if task_doc else None
+            if project_id and ObjectId.is_valid(project_id):
+                project_doc = await db.projects.find_one({"_id": ObjectId(project_id)})
+                if project_doc:
+                    project_name = project_doc.get("name", "Personal")
+
             await send_assignment_email(
                 assignee_doc["email"],
                 assignee_doc.get("fullName") or assignee_doc.get("userName", "Student"),
                 assigner_name,
-                task_title
+                task_title,
+                project_name=project_name,
+                day=task_doc.get("day") if task_doc else None,
+                task_type=task_doc.get("taskType") if task_doc else None,
+                task_description=(task_doc.get("description") or task_doc.get("taskDescription")) if task_doc else None
             )
 
     return {"status": "success"}
@@ -572,7 +678,8 @@ async def link_task_to_user_proxy(request: Request, body: Dict[str, Any] = Body(
 @router.put("/tasks/user-tasks/{user_id}/{task_id}/active", status_code=200)
 async def mark_task_active_proxy(request: Request, user_id: str, task_id: str):
     """
-    Proxy to make a task active
+    Proxy to make a task active.
+    Used by admin to activate a pending task for a specific user.
     """
     db = request.app.state.db
     result = await db.assignments.update_one(
@@ -646,7 +753,6 @@ async def get_preferences(request: Request, body: Dict[str, Any] = Body(...)):
 async def get_dashboard_stats(request: Request, userId: str):
     db = request.app.state.db
     
-    # 1. Fetch User Stats (Lazy Init)
     user_stats = await db.user_stats.find_one({"userId": userId})
     if not user_stats:
         new_stats = UserStats(userId=userId)
@@ -655,8 +761,6 @@ async def get_dashboard_stats(request: Request, userId: str):
     else:
         user_stats = serialize(user_stats)
 
-    # 2. Fetch User Tasks & Assignments
-    # We need to join Assignments with Tasks to get skillType and status
     assignments_doc = await db.user_task_assignments.find_one({"userId": userId})
     
     user_tasks = []
@@ -664,7 +768,6 @@ async def get_dashboard_stats(request: Request, userId: str):
         task_list = assignments_doc.get("tasks", [])
         task_ids = [ObjectId(t["taskId"]) for t in task_list if ObjectId.is_valid(t["taskId"])]
         
-        # Fetch task details
         tasks_cursor = db.tasks.find({"_id": {"$in": task_ids}})
         all_tasks = {str(doc["_id"]): doc async for doc in tasks_cursor}
         
@@ -680,11 +783,9 @@ async def get_dashboard_stats(request: Request, userId: str):
                     "estimatedTime": task_details.get("estimatedTime", 0)
                 })
 
-    # 3. Calculate Stats
     total_active = sum(1 for t in user_tasks if t["status"] == "active")
     total_completed = sum(1 for t in user_tasks if t["status"] == "completed")
     
-    # 4. Calculate Skills Progress
     skills_map = {}
     for t in user_tasks:
         skill = t["skillType"]
@@ -731,8 +832,6 @@ async def log_activity(request: Request, body: Dict[str, Any] = Body(...)):
         "$set": {"lastActivityDate": today}
     }
     
-    # Simple Streak Logic (Reset if last activity was before yesterday)
-    # Real implementation would require precise date comparison
     if user_stats:
         last_date = user_stats.get("lastActivityDate")
         if last_date:
@@ -744,7 +843,6 @@ async def log_activity(request: Request, body: Dict[str, Any] = Body(...)):
         else:
              update_ops["$set"]["currentStreak"] = 1
     else:
-        # Create if not exists (handled by update with upsert=True mostly, but let's be safe)
         new_stats = UserStats(userId=user_id, totalXP=xp_earned, currentStreak=1, lastActivityDate=today)
         await db.user_stats.insert_one(new_stats.model_dump(exclude={"id"}))
         return {"status": "success", "message": "Stats created"}
@@ -772,13 +870,10 @@ async def send_jobs_email(request: Request, body: SendJobsEmailRequest = Body(..
     if not zepto_token:
         raise HTTPException(status_code=500, detail="ZEPTO_MAIL_TOKEN not configured")
 
-    # 1. Process Job Shortcodes
-    # Sanitize short codes: strip any quotes and whitespace
     short_codes = [sc.replace('"', '').replace("'", "").strip() for sc in body.jobShortCodes.split(",") if sc.strip()]
     if not short_codes:
         raise HTTPException(status_code=400, detail="No job shortcodes provided")
 
-    # Fetch all requested jobs once
     cursor = db.jobposts.find({"shortCode": {"$in": short_codes}})
     all_jobs_list = []
     async for doc in cursor:
@@ -787,12 +882,9 @@ async def send_jobs_email(request: Request, body: SendJobsEmailRequest = Body(..
     if not all_jobs_list:
         raise HTTPException(status_code=404, detail="No jobs found for the provided shortcodes")
 
-    # 2. Identify Target Users
     user_query = {"email": {"$exists": True, "$ne": ""}}
     
-    # IITG Exclusion Logic
     if body.allColleges and body.excludeIITG:
-        # Find IITG's collegeId using a case-insensitive regex
         import re
         iitg_college = await db.colleges.find_one({"collegeName": {"$regex": re.compile("Indian Institute of Technology.*Guwahati|IIT.*Guwahati|IITG", re.IGNORECASE)}})
         if iitg_college:
@@ -804,12 +896,10 @@ async def send_jobs_email(request: Request, body: SendJobsEmailRequest = Body(..
         else:
             user_query["collegeId"] = body.collegeId
 
-    # Fetch Unsubscribed List
     unsubscribed_emails = await db.email_unsubscribes.distinct("email")
     if unsubscribed_emails:
         user_query["email"]["$nin"] = unsubscribed_emails
 
-    # Fetch users with collegeId for personalization
     user_cursor = db.users.find(user_query, {"email": 1, "fullName": 1, "userName": 1, "collegeId": 1})
     target_users = []
     async for u in user_cursor:
@@ -818,13 +908,11 @@ async def send_jobs_email(request: Request, body: SendJobsEmailRequest = Body(..
     if not target_users:
         return {"status": "success", "message": "No users found for the selected criteria", "sentCount": 0}
 
-    # Fetch College Names for mapping
     colleges_cursor = db.colleges.find({}, {"collegeName": 1, "_id": 1})
     college_map = {}
     async for c in colleges_cursor:
         college_map[str(c["_id"])] = c.get("collegeName") or "your college"
 
-    # 4. Dispatch Emails via ZeptoMail
     template_key = body.templateId or "2518b.6d1e43aa616e32a8.k1.f80371c0-025f-11f1-9250-ae9c7e0b6a9f.19c2c97aadc"
     current_date = datetime.now().strftime("%d %b %Y")
     
@@ -838,23 +926,17 @@ async def send_jobs_email(request: Request, body: SendJobsEmailRequest = Body(..
             user_college_id = str(user.get("collegeId")) if user.get("collegeId") else None
             user_college_name = college_map.get(user_college_id, "your college")
 
-            # Generate Unsubscribe Link first to use in message
             unsubscribe_token = base64.b64encode(user_email.encode()).decode()
             unsubscribe_url = f"https://projectschool.alumnx.com/api/projectschool/unsubscribe?token={unsubscribe_token}"
 
-            # --- Personalize Message Structure ---
-            
-            # 1. Intro
             job_details_html = f"<p style='margin-bottom: 20px; font-size: 16px;'>As you are a registered user of Alumnx, we are sending you a curated list of jobs from your Alumni Updated and From Alumnx Jobs.</p>"
 
-            # 2. Alumni Heading Box
             job_details_html += """
             <div style="background-color: #25586b; color: #ffffff; padding: 12px 18px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; font-size: 16px;">
                 Your college alumni jobs
             </div>
             """
 
-            # 3. Alumni Jobs Section
             alumni_jobs = [j for j in all_jobs_list if str(j.get("postedByCollegeId")) == user_college_id]
             if alumni_jobs:
                 job_details_html += "<ul style='margin-bottom: 30px; padding-left: 20px; line-height: 1.6;'>"
@@ -867,14 +949,12 @@ async def send_jobs_email(request: Request, body: SendJobsEmailRequest = Body(..
             else:
                 job_details_html += f"<p style='margin-bottom: 30px; color: #64748b; font-style: italic; padding: 0 10px;'>You don't have alumni jobs from {user_college_name} yet.</p>"
 
-            # 4. Alumnx Curated Jobs Heading Box
             job_details_html += """
             <div style="background-color: #25586b; color: #ffffff; padding: 12px 18px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; font-size: 16px;">
                 Alumnx Curated Jobs in AI/ML/DS
             </div>
             """
 
-            # 5. General Jobs Section
             job_details_html += "<ul style='margin-bottom: 35px; padding-left: 20px; line-height: 1.6;'>"
             for job in all_jobs_list:
                 title = job.get("jobTitle") or job.get("title") or "Untitled Job"
@@ -883,7 +963,6 @@ async def send_jobs_email(request: Request, body: SendJobsEmailRequest = Body(..
                 job_details_html += f"<li style='margin-bottom: 12px;'><strong style='color: #0f172a;'>{title}</strong>: <a href='{job_link}' style='color: #2563eb; text-decoration: none; font-weight: 600;'>Apply in Portal</a></li>"
             job_details_html += "</ul>"
 
-            # 6. Unsubscribe & Footer
             job_details_html += f"""
             <div style="border-top: 1px solid #e2e8f0; padding-top: 25px; margin-top: 20px; font-size: 14px; color: #64748b;">
                 <p>If you do not want to get this email every week, you can <a href='{unsubscribe_url}' style='color: #64748b; text-decoration: underline;'>click here to unsubscribe</a> Alumni Jobs.</p>
