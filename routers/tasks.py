@@ -193,11 +193,23 @@ async def create_task(request: Request, task: Task = Body(...)):
                 assignee_doc = await db.users.find_one({"_id": ObjectId(user_id)})
             
             if assignee_doc and assignee_doc.get("email"):
+                # Fetch project name for better notification
+                project_name = "Personal"
+                project_id = task_dict.get("project_id")
+                if project_id and ObjectId.is_valid(project_id):
+                    project_doc = await db.projects.find_one({"_id": ObjectId(project_id)})
+                    if project_doc:
+                        project_name = project_doc.get("name", "Personal")
+
                 await send_assignment_email(
                     assignee_doc["email"],
                     assignee_doc.get("fullName") or assignee_doc.get("userName", "Student"),
                     admin_name,
-                    task_dict.get("title", "a task")
+                    task_dict.get("title", "a task"),
+                    project_name=project_name,
+                    day=task_dict.get("day"),
+                    task_type=task_dict.get("taskType"),
+                    task_description=task_dict.get("description")
                 )
 
             assigned_count += 1
@@ -380,11 +392,23 @@ async def link_task_to_user(request: Request, link: UserTaskLink = Body(...)):
         assignee_doc = await db.users.find_one({"_id": ObjectId(link.userId)})
     
     if assignee_doc and assignee_doc.get("email"):
+        # Fetch project name for better notification
+        project_name = "Personal"
+        project_id = task_doc.get("project_id")
+        if project_id and ObjectId.is_valid(project_id):
+            project_doc = await db.projects.find_one({"_id": ObjectId(project_id)})
+            if project_doc:
+                project_name = project_doc.get("name", "Personal")
+
         await send_assignment_email(
             assignee_doc["email"],
             assignee_doc.get("fullName") or assignee_doc.get("userName", "Student"),
             admin_name,
-            task_doc.get("title", "a task")
+            task_doc.get("title", "a task"),
+            project_name=project_name,
+            day=task_doc.get("day"),
+            task_type=task_doc.get("taskType"),
+            task_description=task_doc.get("description")
         )
 
     return {"status": "success", "message": "Task assigned to user"}
@@ -798,7 +822,10 @@ async def bulk_assign_tasks_to_user(request: Request, bulk_req: BulkAssignTasksR
             assignee_doc["email"],
             assignee_doc.get("fullName") or assignee_doc.get("userName", "Student"),
             admin_name,
-            f"{task_count} tasks (including {task_summary})"
+            f"{task_count} tasks (including {task_summary})",
+            project_name="Multiple Projects",
+            day="Multiple Days",
+            task_type="Mixed"
         )
 
     print(f"✅ Bulk assigned {len(tasks)} tasks to user {user_id}")
