@@ -929,45 +929,85 @@ async def send_jobs_email(request: Request, body: SendJobsEmailRequest = Body(..
             unsubscribe_token = base64.b64encode(user_email.encode()).decode()
             unsubscribe_url = f"https://projectschool.alumnx.com/api/projectschool/unsubscribe?token={unsubscribe_token}"
 
-            job_details_html = f"<p style='margin-bottom: 20px; font-size: 16px;'>As you are a registered user of Alumnx, we are sending you a curated list of jobs from your Alumni Updated and From Alumnx Jobs.</p>"
+            # ── Section 1: Your College Alumni Jobs ──────────────────────────
+            alumni_jobs = [j for j in all_jobs_list if str(j.get("alumniCollegeId") or "") == user_college_id]
 
-            job_details_html += """
-            <div style="background-color: #25586b; color: #ffffff; padding: 12px 18px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; font-size: 16px;">
-                Your college alumni jobs
+            job_details_html = """
+            <div style="font-size:11px;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">
+                &#9632;&nbsp; Your College Alumni Jobs
             </div>
             """
 
-            alumni_jobs = [j for j in all_jobs_list if str(j.get("postedByCollegeId")) == user_college_id]
             if alumni_jobs:
-                job_details_html += "<ul style='margin-bottom: 30px; padding-left: 20px; line-height: 1.6;'>"
+                job_details_html += """<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:8px;">"""
                 for job in alumni_jobs:
                     title = job.get("jobTitle") or job.get("title") or "Untitled Job"
                     short_code = job.get("shortCode")
                     job_link = f"https://alumnx.com/jobs?job={short_code}"
-                    job_details_html += f"<li style='margin-bottom: 12px;'><strong style='color: #0f172a;'>{title}</strong>: <a href='{job_link}' style='color: #2563eb; text-decoration: none; font-weight: 600;'>Apply in Portal</a></li>"
-                job_details_html += "</ul>"
+                    job_details_html += f"""
+                    <tr>
+                      <td style="padding:10px 0;border-bottom:1px solid #f1f5f9;">
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                          <tr>
+                            <td style="font-size:14px;font-weight:600;color:#0f172a;padding-right:12px;">{title}</td>
+                            <td align="right" style="white-space:nowrap;">
+                              <a href="{job_link}" style="display:inline-block;background:#2563eb;color:#ffffff;font-size:12px;font-weight:600;text-decoration:none;padding:6px 16px;border-radius:6px;">Apply</a>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
+                    """
+                job_details_html += "</table>"
             else:
-                job_details_html += f"<p style='margin-bottom: 30px; color: #64748b; font-style: italic; padding: 0 10px;'>You don't have alumni jobs from {user_college_name} yet.</p>"
+                job_details_html += f"""<p style="color:#94a3b8;font-size:13px;font-style:italic;margin-bottom:16px;">No alumni jobs from {user_college_name} yet.</p>"""
 
+            # ── Add a Job CTA ─────────────────────────────────────────────────
             job_details_html += """
-            <div style="background-color: #25586b; color: #ffffff; padding: 12px 18px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; font-size: 16px;">
-                Alumnx Curated Jobs in AI/ML/DS
-            </div>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 24px;">
+              <tr>
+                <td style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px 20px;">
+                  <p style="font-size:13px;font-weight:700;color:#166534;margin:0 0 4px;">Know a great opportunity?</p>
+                  <p style="font-size:12px;color:#64748b;margin:0 0 12px;">Share with your alumni community. It takes less than 2 minutes.</p>
+                  <a href="https://docs.google.com/forms/d/e/1FAIpQLSf7leWw8z91UEjYlKFT6HNVh2HJKZmpbrki52xfUo6YJ96ioA/viewform"
+                     style="display:inline-block;background:#16a34a;color:#ffffff;font-size:13px;font-weight:700;text-decoration:none;padding:9px 22px;border-radius:7px;">+ Add a Job Opening</a>
+                </td>
+              </tr>
+            </table>
             """
 
-            job_details_html += "<ul style='margin-bottom: 35px; padding-left: 20px; line-height: 1.6;'>"
+            # ── Section 2: Alumnx Curated Jobs ───────────────────────────────
+            job_details_html += """
+            <div style="font-size:11px;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid #e2e8f0;">
+                &#9632;&nbsp; Alumnx Curated Jobs in AI / ML / DS
+            </div>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+            """
             for job in all_jobs_list:
                 title = job.get("jobTitle") or job.get("title") or "Untitled Job"
                 short_code = job.get("shortCode")
                 job_link = f"https://alumnx.com/jobs?job={short_code}"
-                job_details_html += f"<li style='margin-bottom: 12px;'><strong style='color: #0f172a;'>{title}</strong>: <a href='{job_link}' style='color: #2563eb; text-decoration: none; font-weight: 600;'>Apply in Portal</a></li>"
-            job_details_html += "</ul>"
+                job_details_html += f"""
+                <tr>
+                  <td style="padding:10px 0;border-bottom:1px solid #f1f5f9;">
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td style="font-size:14px;font-weight:600;color:#0f172a;padding-right:12px;">{title}</td>
+                        <td align="right" style="white-space:nowrap;">
+                          <a href="{job_link}" style="display:inline-block;background:#2563eb;color:#ffffff;font-size:12px;font-weight:600;text-decoration:none;padding:6px 16px;border-radius:6px;">Apply</a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                """
+            job_details_html += "</table>"
 
             job_details_html += f"""
-            <div style="border-top: 1px solid #e2e8f0; padding-top: 25px; margin-top: 20px; font-size: 14px; color: #64748b;">
-                <p>If you do not want to get this email every week, you can <a href='{unsubscribe_url}' style='color: #64748b; text-decoration: underline;'>click here to unsubscribe</a> Alumni Jobs.</p>
-                <p style="margin-top: 20px; font-weight: bold; color: #0f172a;">Thank you,<br>Support@Alumnx.com</p>
-            </div>
+            <p style="font-size:12px;color:#94a3b8;text-align:center;margin-top:8px;">
+                If you do not want to get this email every week, you can
+                <a href='{unsubscribe_url}' style='color:#94a3b8;text-decoration:underline;'>click here to unsubscribe</a> from Alumni Jobs.
+            </p>
             """
             
             zepto_payload = {
